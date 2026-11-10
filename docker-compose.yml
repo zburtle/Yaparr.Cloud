@@ -1,0 +1,51 @@
+# Runs the service behind Caddy, which gets and renews an https certificate by itself.
+#
+#   1. Point a DNS name at this machine and open ports 80 and 443 to it.
+#   2. cp .env.example .env     and put that name in DOMAIN
+#   3. docker compose up -d --build
+#   4. docker compose exec cloud dotnet Yaparr.Cloud.dll accounts add sam
+#
+# Give your friends https://<DOMAIN> as the server address, and the username and password that step 4 shows.
+# To use a proxy you already have instead of Caddy, delete the "caddy" service, publish the service's port
+# ("127.0.0.1:8080:8080") and point your proxy at it. Keep Service__BehindProxy=true only while a proxy is in front.
+
+services:
+  cloud:
+    build: .
+    restart: unless-stopped
+    environment:
+      Service__BehindProxy: "true"          # the caller's address comes from the proxy's X-Forwarded-For
+      # Service__MaxBlobBytes: "536870912"   # the largest backup, in bytes (512 MiB)
+      # Service__KeepVersions: "5"
+      # Service__WritesPerHour: "12"
+      # Service__RequestsPerMinute: "120"
+    volumes:
+      - cloud-data:/data                     # the accounts and every backup: this is what to back up
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /healthz HTTP/1.0\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q 200"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      cloud:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env to the name that points at this machine}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data                     # the certificates
+      - caddy-config:/config
+
+volumes:
+  cloud-data:
+  caddy-data:
+  caddy-config:

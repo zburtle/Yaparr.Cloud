@@ -23,6 +23,10 @@ services:
       - cloud-data:/data                     # the accounts and every backup: this is what to back up
     expose:
       - "8080"
+    # Also reachable on this computer only (127.0.0.1), for a proxy you already run instead of Caddy. Set SERVICE_BIND=0.0.0.0 to reach it from
+    # other computers (then it is plain http, so only on a network you trust), and SERVICE_PORT to change the port.
+    ports:
+      - "${SERVICE_BIND:-127.0.0.1}:${SERVICE_PORT:-8080}:8080"
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /healthz HTTP/1.0\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q 200"]
       interval: 30s
@@ -36,8 +40,8 @@ services:
       cloud:
         condition: service_healthy
     ports:
-      - "80:80"
-      - "443:443"
+      - "${HTTP_PORT:-80}:80"                # Caddy needs 80 and 443 reachable from the internet to get a certificate; change these
+      - "${HTTPS_PORT:-443}:443"             # only when something in front forwards 80 and 443 to them, or you bring your own certificate
     environment:
       DOMAIN: ${DOMAIN:?Set DOMAIN in .env to the name that points at this machine}
     volumes:

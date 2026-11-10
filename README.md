@@ -71,7 +71,7 @@ docker compose up -d --build
 docker compose exec cloud dotnet Yaparr.Cloud.dll accounts add sam
 ```
 
-Point a DNS name at the machine and open ports 80 and 443 first. Friends use `https://<DOMAIN>` as the server address. Everything (the account list and every backup) is in the `cloud-data` volume, so that is what to back up. To use a proxy you already have, remove the `caddy` service, publish the service's port on `127.0.0.1` and keep `Service__BehindProxy=true`. Settings are the `Service__...` environment variables in the compose file.
+Point a DNS name at the machine and open ports 80 and 443 first. Friends use `https://<DOMAIN>` as the server address. Everything (the account list and every backup) is in the `cloud-data` volume, so that is what to back up. The ports are set in `.env` (see `.env.example`): `HTTP_PORT` and `HTTPS_PORT` for Caddy (80 and 443 by default; Caddy needs them reachable from the internet to get a certificate, so change them only when something in front forwards 80 and 443 to them), and `SERVICE_PORT` and `SERVICE_BIND` for the service itself (8080 on `127.0.0.1` by default). To use a proxy you already have, remove the `caddy` service and point the proxy at the service's port, keeping `Service__BehindProxy=true`. Settings are the `Service__...` environment variables in the compose file.
 
 ## Building
 

@@ -1,55 +1,41 @@
-# Runs the service behind Caddy, which gets and renews an https certificate by itself.
+# Runs the service. It speaks plain http, so put your own reverse proxy in front of it for https and point the proxy at the port below.
 #
-#   1. Point a DNS name at this machine and open ports 80 and 443 to it.
-#   2. cp .env.example .env     and put that name in DOMAIN
-#   3. docker compose up -d --build
-#   4. docker compose exec cloud dotnet Yaparr.Cloud.dll accounts add sam
+#   1. docker compose up -d --build
+#   2. docker compose exec cloud dotnet Yaparr.Cloud.dll accounts add sam
+#   3. In your proxy, send your domain to http://127.0.0.1:8080 (or the port you set).
 #
-# Give your friends https://<DOMAIN> as the server address, and the username and password that step 4 shows.
-# To use a proxy you already have instead of Caddy, delete the "caddy" service, publish the service's port
-# ("127.0.0.1:8080:8080") and point your proxy at it. Keep Service__BehindProxy=true only while a proxy is in front.
+# Give your friends https://<your domain> as the server address, and the username and password that step 2 shows.
+# Keep Service__BehindProxy=true while a proxy is in front: the caller's address then comes from its X-Forwarded-For.
+# The proxy has to set that header itself (most do), or every caller looks like the proxy and shares one rate limit.
 
 services:
   cloud:
     build: .
     restart: unless-stopped
     environment:
-      Service__BehindProxy: "true"          # the caller's address comes from the proxy's X-Forwarded-For
-      # Service__MaxBlobBytes: "536870912"   # the largest backup, in bytes (512 MiB)
+      Service__BehindProxy: "true"
+      # Service__MaxBlobBytes: "536870912"   # the largest backup, in bytes (512 MiB); the proxy must allow bodies this big
       # Service__KeepVersions: "5"
       # Service__WritesPerHour: "12"
       # Service__RequestsPerMinute: "120"
     volumes:
       - cloud-data:/data                     # the accounts and every backup: this is what to back up
-    expose:
-      - "8080"
-    # Also reachable on this computer only (127.0.0.1), for a proxy you already run instead of Caddy. Set SERVICE_BIND=0.0.0.0 to reach it from
-    # other computers (then it is plain http, so only on a network you trust), and SERVICE_PORT to change the port.
+    # On this computer only (127.0.0.1) unless SERVICE_BIND says otherwise. 0.0.0.0 reaches it from other computers, as plain http,
+    # so only on a network you trust. SERVICE_PORT changes the port.
     ports:
       - "${SERVICE_BIND:-127.0.0.1}:${SERVICE_PORT:-8080}:8080"
+    # A proxy that runs in a container of its own cannot reach 127.0.0.1 of this computer. To put the service on the proxy's network instead,
+    # create it once (docker network create proxy), list it here and under "networks:" below, and send the proxy to http://cloud:8080.
+    # networks: [default, proxy]
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /healthz HTTP/1.0\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q 200"]
       interval: 30s
       timeout: 5s
       retries: 3
 
-  caddy:
-    image: caddy:2
-    restart: unless-stopped
-    depends_on:
-      cloud:
-        condition: service_healthy
-    ports:
-      - "${HTTP_PORT:-80}:80"                # Caddy needs 80 and 443 reachable from the internet to get a certificate; change these
-      - "${HTTPS_PORT:-443}:443"             # only when something in front forwards 80 and 443 to them, or you bring your own certificate
-    environment:
-      DOMAIN: ${DOMAIN:?Set DOMAIN in .env to the name that points at this machine}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data                     # the certificates
-      - caddy-config:/config
-
 volumes:
   cloud-data:
-  caddy-data:
-  caddy-config:
+
+# networks:
+#   proxy:
+#     external: true

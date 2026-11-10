@@ -1,0 +1,8 @@
+<Project>
+
+  <!-- A warning is a bug that has not happened yet: the build fails on one. -->
+  <PropertyGroup>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+</Project>

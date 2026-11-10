@@ -6,7 +6,7 @@ namespace Yaparr.Cloud;
 
 public sealed record BackupVersion(int Version, long Size, DateTimeOffset At);
 
-public enum SaveOutcome { Saved, Conflict, TooLarge, HashMismatch, NotALockedBackup }
+public enum SaveOutcome { Saved, Conflict, TooLarge, NotALockedBackup }
 
 public sealed record SaveResult(SaveOutcome Outcome, int Version = 0, long Size = 0);
 
@@ -29,6 +29,10 @@ public sealed class BackupStore
         _root = Path.GetFullPath(options.DataDirectory);
         Directory.CreateDirectory(_root);
     }
+
+    /// <summary>The name of an account's folder: the hex SHA-256 of its username, so nothing from a request ever becomes part of a path.</summary>
+    public static string FolderOf(string username) =>
+        Convert.ToHexStringLower(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("yaparr-account:" + username)));
 
     private static string FileName(int version) => "v" + version.ToString("D8", CultureInfo.InvariantCulture) + ".bin";
 
@@ -68,10 +72,9 @@ public sealed class BackupStore
 
     /// <summary>
     /// Saves a new version if <paramref name="basedOn"/> is the version that is newest now (0 for an account with none), so two devices cannot overwrite
-    /// each other's backup without knowing, and a request that is sent twice is saved once. The body is read once, checked against the hash the
-    /// request was signed with, and only then put in place.
+    /// each other's backup without knowing, and a request that is sent twice is saved once. The body is written to a temporary file and only then put in place.
     /// </summary>
-    public async Task<SaveResult> SaveAsync(string account, int basedOn, Stream body, string expectedSha256, CancellationToken cancel)
+    public async Task<SaveResult> SaveAsync(string account, int basedOn, Stream body, CancellationToken cancel)
     {
         var folder = Folder(account);
         var gate = _locks.GetOrAdd(account, _ => new SemaphoreSlim(1, 1));
@@ -86,7 +89,6 @@ public sealed class BackupStore
             try
             {
                 long size = 0;
-                using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
                 var head = new byte[Magic.Length];
                 int headLength = 0;
                 await using (var file = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, useAsync: true))
@@ -103,12 +105,10 @@ public sealed class BackupStore
                             Array.Copy(buffer, 0, head, headLength, take);
                             headLength += take;
                         }
-                        hash.AppendData(buffer, 0, n);
                         await file.WriteAsync(buffer.AsMemory(0, n), cancel);
                     }
                 }
                 if (headLength < head.Length || !head.AsSpan().SequenceEqual(Magic)) return new SaveResult(SaveOutcome.NotALockedBackup);
-                if (!string.Equals(Convert.ToHexStringLower(hash.GetHashAndReset()), expectedSha256, StringComparison.Ordinal)) return new SaveResult(SaveOutcome.HashMismatch);
 
                 var version = basedOn + 1;
                 File.Move(temp, Path.Combine(folder, FileName(version)));

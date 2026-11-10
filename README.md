@@ -61,6 +61,18 @@ Files, one folder per account (the hex SHA-256 of its username) with numbered ve
 - Hosting: https through a reverse proxy, a container image, backups of the data folder, and monitoring.
 - A per-account storage quota, if one is wanted.
 
+## Running it with Docker
+
+`docker-compose.yml` runs the service behind Caddy, which gets and renews an https certificate by itself.
+
+```
+cp .env.example .env            # put the name that points at this machine in DOMAIN
+docker compose up -d --build
+docker compose exec cloud dotnet Yaparr.Cloud.dll accounts add sam
+```
+
+Point a DNS name at the machine and open ports 80 and 443 first. Friends use `https://<DOMAIN>` as the server address. Everything (the account list and every backup) is in the `cloud-data` volume, so that is what to back up. To use a proxy you already have, remove the `caddy` service, publish the service's port on `127.0.0.1` and keep `Service__BehindProxy=true`. Settings are the `Service__...` environment variables in the compose file.
+
 ## Building
 
 ```

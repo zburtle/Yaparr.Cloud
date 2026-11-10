@@ -63,15 +63,20 @@ Files, one folder per account (the hex SHA-256 of its username) with numbered ve
 
 ## Running it with Docker
 
-`docker-compose.yml` runs the service behind Caddy, which gets and renews an https certificate by itself.
+`docker-compose.yml` runs the service on its own, on plain http. Put your own reverse proxy in front of it for https.
 
 ```
-cp .env.example .env            # put the name that points at this machine in DOMAIN
 docker compose up -d --build
 docker compose exec cloud dotnet Yaparr.Cloud.dll accounts add sam
 ```
 
-Point a DNS name at the machine and open ports 80 and 443 first. Friends use `https://<DOMAIN>` as the server address. Everything (the account list and every backup) is in the `cloud-data` volume, so that is what to back up. To use a proxy you already have, remove the `caddy` service, publish the service's port on `127.0.0.1` and keep `Service__BehindProxy=true`. Settings are the `Service__...` environment variables in the compose file.
+Then send your domain to `http://127.0.0.1:8080` in the proxy. Friends use `https://<your domain>` as the server address. Everything (the account list and every backup) is in the `cloud-data` volume, so that is what to back up.
+
+- **Ports:** `SERVICE_PORT` (8080) and `SERVICE_BIND` (`127.0.0.1`, this computer only) are set in `.env` (see `.env.example`). `0.0.0.0` opens it to other computers as plain http, so only on a network you trust.
+- **A proxy in a container:** it cannot reach `127.0.0.1` of the host. The compose file has a commented-out shared network for that: the proxy then sends to `http://cloud:8080`.
+- **The proxy must** set `X-Forwarded-For` (most do), or every caller looks like the proxy and shares one rate limit, and it must allow request bodies as large as `Service__MaxBlobBytes` (512 MiB by default).
+- **Settings** are the `Service__...` environment variables in the compose file. Keep `Service__BehindProxy=true` while a proxy is in front.
+- **Komodo:** a Stack with a Git Repo source, this repository and `docker-compose.yml` works as it is.
 
 ## Building
 

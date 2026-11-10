@@ -47,7 +47,7 @@ public sealed class LoginTests : ServiceTest
     public async Task Signing_in_in_the_browser_gives_the_app_a_token_that_works()
     {
         var client = Start();
-        new AccountDirectory(Options).Add("sam", Password);
+        new AccountDirectory(Options).Add("sam@example.com", Password);
         var (verifier, challenge) = Pkce();
 
         // The page the browser shows.
@@ -60,13 +60,13 @@ public sealed class LoginTests : ServiceTest
         Assert.Contains("frame-ancestors 'none'", page.Headers.GetValues("Content-Security-Policy").Single());
 
         // The person signs in (the name typed any way), and the browser is sent back to the app with a code.
-        var code = CodeIn(await PostLogin(client, challenge, "  Sam ", Password));
+        var code = CodeIn(await PostLogin(client, challenge, "  Sam@Example.COM ", Password));
 
         // The app trades the code for a token, and the token works.
         var traded = await Trade(client, code, verifier);
         Assert.Equal(HttpStatusCode.OK, traded.StatusCode);
         var answer = await traded.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("sam", answer.GetProperty("username").GetString());
+        Assert.Equal("sam@example.com", answer.GetProperty("username").GetString());
         var token = answer.GetProperty("token").GetString()!;
         Assert.Equal(HttpStatusCode.Created, (await Send(client, token, HttpMethod.Put, "/v1/backup", Locked(), ifMatch: 0)).StatusCode);
 
@@ -79,32 +79,32 @@ public sealed class LoginTests : ServiceTest
     public async Task A_wrong_password_and_an_unknown_name_get_the_same_page_and_no_code()
     {
         var client = Start();
-        new AccountDirectory(Options).Add("sam", Password);
+        new AccountDirectory(Options).Add("sam@example.com", Password);
         var (_, challenge) = Pkce();
 
-        var wrong = await PostLogin(client, challenge, "sam", "not the password");
-        var unknown = await PostLogin(client, challenge, "alex", Password);
+        var wrong = await PostLogin(client, challenge, "sam@example.com", "not the password");
+        var unknown = await PostLogin(client, challenge, "alex@example.com", Password);
         Assert.Equal(HttpStatusCode.Unauthorized, wrong.StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, unknown.StatusCode);
         Assert.Null(wrong.Headers.Location);
         var a = await wrong.Content.ReadAsStringAsync();
         var b = await unknown.Content.ReadAsStringAsync();
         Assert.Contains("The username or password is wrong.", a);
-        Assert.Equal(a.Replace("value=\"sam\"", ""), b.Replace("value=\"alex\"", ""));   // the same but for the name typed
+        Assert.Equal(a.Replace("value=\"sam@example.com\"", ""), b.Replace("value=\"alex@example.com\"", ""));   // the same but for the name typed
     }
 
     [Fact]
     public async Task A_code_works_once_and_only_with_the_verifier_of_the_app_that_asked()
     {
         var client = Start();
-        new AccountDirectory(Options).Add("sam", Password);
+        new AccountDirectory(Options).Add("sam@example.com", Password);
         var (verifier, challenge) = Pkce();
 
-        var stolen = CodeIn(await PostLogin(client, challenge, "sam", Password));
+        var stolen = CodeIn(await PostLogin(client, challenge, "sam@example.com", Password));
         Assert.Equal(HttpStatusCode.BadRequest, (await Trade(client, stolen, Pkce().Verifier)).StatusCode);   // someone who saw the code go by
         Assert.Equal(HttpStatusCode.BadRequest, (await Trade(client, stolen, verifier)).StatusCode);          // and it is spent now, even for the app
 
-        var code = CodeIn(await PostLogin(client, challenge, "sam", Password));
+        var code = CodeIn(await PostLogin(client, challenge, "sam@example.com", Password));
         Assert.Equal(HttpStatusCode.OK, (await Trade(client, code, verifier)).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await Trade(client, code, verifier)).StatusCode);            // not twice
 
@@ -124,10 +124,10 @@ public sealed class LoginTests : ServiceTest
     public async Task The_browser_is_only_ever_sent_back_to_the_computer_it_is_on(string redirect)
     {
         var client = Start();
-        new AccountDirectory(Options).Add("sam", Password);
+        new AccountDirectory(Options).Add("sam@example.com", Password);
         var (_, challenge) = Pkce();
         Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync(LoginUrl(challenge, redirect))).StatusCode);
-        var posted = await PostLogin(client, challenge, "sam", Password, redirect);
+        var posted = await PostLogin(client, challenge, "sam@example.com", Password, redirect);
         Assert.Equal(HttpStatusCode.BadRequest, posted.StatusCode);   // even with the right password
         Assert.Null(posted.Headers.Location);
     }
@@ -158,11 +158,11 @@ public sealed class LoginTests : ServiceTest
     public async Task Guessing_a_password_is_stopped_after_a_number_of_tries_even_with_the_right_one()
     {
         var client = Start(new() { ["RequestsPerMinute"] = "1000" });
-        new AccountDirectory(Options).Add("sam", Password);
+        new AccountDirectory(Options).Add("sam@example.com", Password);
         var (_, challenge) = Pkce();
         for (int i = 0; i < 8; i++)
-            Assert.Equal(HttpStatusCode.Unauthorized, (await PostLogin(client, challenge, "sam", "guess number " + i)).StatusCode);
-        Assert.Equal(HttpStatusCode.TooManyRequests, (await PostLogin(client, challenge, "sam", Password)).StatusCode);
+            Assert.Equal(HttpStatusCode.Unauthorized, (await PostLogin(client, challenge, "sam@example.com", "guess number " + i)).StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await PostLogin(client, challenge, "sam@example.com", Password)).StatusCode);
     }
 
     [Fact]
@@ -171,8 +171,8 @@ public sealed class LoginTests : ServiceTest
         // The example from the standard (RFC 7636, appendix B), which the app's own test uses too.
         var flow = new LoginFlow();
         var request = LoginFlow.Read(Redirect, "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", State, "x", out _)!;
-        var code = System.Web.HttpUtility.ParseQueryString(new Uri(flow.Complete(request, "sam")).Query)["code"];
-        Assert.Equal("sam", flow.Redeem(code, "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")?.User);
+        var code = System.Web.HttpUtility.ParseQueryString(new Uri(flow.Complete(request, "sam@example.com")).Query)["code"];
+        Assert.Equal("sam@example.com", flow.Redeem(code, "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")?.User);
     }
 
     [Fact]
@@ -180,16 +180,16 @@ public sealed class LoginTests : ServiceTest
     {
         var now = DateTimeOffset.UtcNow;
         var limiter = new LoginLimiter(() => now);
-        for (int i = 0; i < 8; i++) limiter.Failed("sam");
-        Assert.True(limiter.IsBlocked("sam"));
-        Assert.False(limiter.IsBlocked("alex"));
+        for (int i = 0; i < 8; i++) limiter.Failed("sam@example.com");
+        Assert.True(limiter.IsBlocked("sam@example.com"));
+        Assert.False(limiter.IsBlocked("alex@example.com"));
         now = now.AddMinutes(16);
-        Assert.False(limiter.IsBlocked("sam"));
+        Assert.False(limiter.IsBlocked("sam@example.com"));
 
-        for (int i = 0; i < 7; i++) limiter.Failed("sam");
-        limiter.Succeeded("sam");
-        limiter.Failed("sam");
-        Assert.False(limiter.IsBlocked("sam"));
+        for (int i = 0; i < 7; i++) limiter.Failed("sam@example.com");
+        limiter.Succeeded("sam@example.com");
+        limiter.Failed("sam@example.com");
+        Assert.False(limiter.IsBlocked("sam@example.com"));
     }
 
     [Fact]
@@ -199,7 +199,7 @@ public sealed class LoginTests : ServiceTest
         var flow = new LoginFlow(() => now);
         var (verifier, challenge) = Pkce();
         var request = LoginFlow.Read(Redirect, challenge, State, "x", out _)!;
-        var code = System.Web.HttpUtility.ParseQueryString(new Uri(flow.Complete(request, "sam")).Query)["code"];
+        var code = System.Web.HttpUtility.ParseQueryString(new Uri(flow.Complete(request, "sam@example.com")).Query)["code"];
         now = now.AddMinutes(3);
         Assert.Null(flow.Redeem(code, verifier));
     }
@@ -214,19 +214,19 @@ public sealed class LoginTests : ServiceTest
     public async Task Changing_the_password_signs_every_device_out_and_keeps_the_backup()
     {
         var client = Start();
-        var token = Register("sam");
+        var token = Register("sam@example.com");
         var body = Locked();
         await Send(client, token, HttpMethod.Put, "/v1/backup", body, ifMatch: 0);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/account/password")).StatusCode);
 
-        var changed = await ChangePassword(client, "sam", Password, "a brand new password");
+        var changed = await ChangePassword(client, "sam@example.com", Password, "a brand new password");
         Assert.Equal(HttpStatusCode.OK, changed.StatusCode);
         Assert.Contains("Password changed", await changed.Content.ReadAsStringAsync());
         Assert.Equal(HttpStatusCode.Unauthorized, (await Send(client, token, HttpMethod.Get, "/v1/backup")).StatusCode);   // the device has to sign in again
 
         var (verifier, challenge) = Pkce();
-        Assert.Equal(HttpStatusCode.Unauthorized, (await PostLogin(client, challenge, "sam", Password)).StatusCode);       // the old password is done
-        var code = CodeIn(await PostLogin(client, challenge, "sam", "a brand new password"));
+        Assert.Equal(HttpStatusCode.Unauthorized, (await PostLogin(client, challenge, "sam@example.com", Password)).StatusCode);       // the old password is done
+        var code = CodeIn(await PostLogin(client, challenge, "sam@example.com", "a brand new password"));
         var fresh = (await (await Trade(client, code, verifier)).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString()!;
         Assert.Equal(body, await (await Send(client, fresh, HttpMethod.Get, "/v1/backup")).Content.ReadAsByteArrayAsync());   // the backup is as it was
     }
@@ -235,11 +235,11 @@ public sealed class LoginTests : ServiceTest
     public async Task A_password_change_needs_the_current_password_and_a_good_new_one()
     {
         var client = Start();
-        var token = Register("sam");
-        Assert.Equal(HttpStatusCode.Unauthorized, (await ChangePassword(client, "sam", "not the password", "a brand new password")).StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, (await ChangePassword(client, "nobody", Password, "a brand new password")).StatusCode);
-        Assert.Equal(HttpStatusCode.BadRequest, (await ChangePassword(client, "sam", Password, "short")).StatusCode);
-        Assert.Equal(HttpStatusCode.BadRequest, (await ChangePassword(client, "sam", Password, "a brand new password", "a different password")).StatusCode);
+        var token = Register("sam@example.com");
+        Assert.Equal(HttpStatusCode.Unauthorized, (await ChangePassword(client, "sam@example.com", "not the password", "a brand new password")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await ChangePassword(client, "nobody@example.com", Password, "a brand new password")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await ChangePassword(client, "sam@example.com", Password, "short")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await ChangePassword(client, "sam@example.com", Password, "a brand new password", "a different password")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await Send(client, token, HttpMethod.Get, "/v1/backup/versions")).StatusCode);   // nothing changed
     }
 }

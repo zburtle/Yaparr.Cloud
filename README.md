@@ -13,22 +13,24 @@ Two secrets, with different jobs:
 - **The password signs a person in**, on a page of this service in their browser. The server keeps an Argon2id hash of it (`Passwords`). It can be changed by the person (`/account/password`) or reset by the admin, and nothing is lost when it is: it does not lock anything.
 - **The recovery code locks the backup.** The app makes it and shows it once; the server never sees it. Nobody here can open a backup, and a lost code cannot be recovered.
 
-Accounts are made by hand. Nobody can make one by asking, and the sign-in page answers a name that does not exist exactly as it answers a wrong password. Eight wrong tries for a name lock that name for a quarter of an hour. A username is 3 to 32 letters, digits, dots, dashes and underscores, kept trimmed and in lower case; a password needs 10 characters or more.
+**An account is named by its owner's email address** (`sam@example.com`, kept trimmed and in lower case), which is what they type on the sign-in page. Nothing is ever sent to it: it only names the account, so there is no email verification and no "forgot password" email. Resetting a password is the admin's job (`accounts password`).
+
+Accounts are made by hand. Nobody can make one by asking, and the sign-in page answers a name that does not exist exactly as it answers a wrong password. Eight wrong tries for a name lock that name for a quarter of an hour. An address is plain ASCII (up to 254 characters, the part before the @ up to 64), with nothing that could be taken for a path or markup; a password needs 10 characters or more.
 
 ### Looking after accounts
 
 Run these where the service runs, with the same `Service__DataDirectory` (in Docker: `docker exec -it <container> dotnet Yaparr.Cloud.dll accounts ...`). The running service sees the change at once, with no restart.
 
 ```
-dotnet Yaparr.Cloud.dll accounts add <username> [--password <password>]
-dotnet Yaparr.Cloud.dll accounts password <username> [--password <password>]
-dotnet Yaparr.Cloud.dll accounts remove <username> [--keep-backup]
+dotnet Yaparr.Cloud.dll accounts add <email> [--password <password>]
+dotnet Yaparr.Cloud.dll accounts password <email> [--password <password>]
+dotnet Yaparr.Cloud.dll accounts remove <email> [--keep-backup]
 dotnet Yaparr.Cloud.dll accounts list
 ```
 
 `add` and `password` without `--password` make one up (like `K7QD-M3XF-9PLR-2WTE-HV8N`) and show it once; give it to the person, who can change it on the sign-in page. Typing a password after `--password` leaves it in your shell history, so prefer the made-up one. `password` also signs the account's devices out. `remove` deletes the backup unless told not to. `list` shows how many devices are signed in and the space used.
 
-An account made by the first version of the service (which kept a public key and no password) shows as `NO PASSWORD` in the list and cannot sign in until `accounts password <name>` gives it one. Backups from that version were locked with the old password, not a recovery code.
+An account whose name is not an email address (from before accounts were named by one) cannot sign in, and `accounts list` says so: add the person again with their address. An account made by the first version of the service (which kept a public key and no password) shows as `NO PASSWORD` in the list and cannot sign in until `accounts password <name>` gives it one. Backups from that version were locked with the old password, not a recovery code.
 
 ### Signing in (`LoginFlow`)
 
@@ -65,7 +67,7 @@ Set `BehindProxy` to `true` only when a reverse proxy is in front (it should be,
 
 ### Storage
 
-Files, one folder per account (the hex SHA-256 of its username) with numbered versions, written to a temporary file and moved into place. `BackupStore` is the only thing that touches them, so S3 or similar can replace it later. `accounts.json` beside them holds the usernames, password hashes and token hashes.
+Files, one folder per account (the hex SHA-256 of its email address) with numbered versions, written to a temporary file and moved into place. `BackupStore` is the only thing that touches them, so S3 or similar can replace it later. `accounts.json` beside them holds the usernames, password hashes and token hashes.
 
 ### Not done yet
 

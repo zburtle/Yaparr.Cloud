@@ -9,7 +9,7 @@ namespace Yaparr.Cloud;
 public sealed record AccountEntry(string Name, DateTimeOffset Created, int Devices, bool HasPassword);
 
 /// <summary>
-/// Who may use the service (<c>accounts.json</c> in the data folder): each username with the hash of its password and the devices that are signed
+/// Who may use the service (<c>accounts.json</c> in the data folder): each account, named by its owner's email address, with the hash of its password and the devices that are signed
 /// in as it. Accounts are made by the person running the service (<see cref="AdminCommands"/>); nobody can make one by asking. A device that has
 /// signed in holds a token, a long random secret; only its SHA-256 is kept here, so the file is of no use for signing in as someone.
 /// The file is read again whenever it changes, so the admin commands need no restart of the service.
@@ -52,17 +52,20 @@ public sealed partial class AccountDirectory
         _path = Path.Combine(root, "accounts.json");
     }
 
-    [GeneratedRegex("^[a-z0-9][a-z0-9._-]{1,30}[a-z0-9]$")]
-    private static partial Regex ValidName();
+    // The part before the @ (letters, digits and . _ % + - , starting and ending with a letter or digit, no two dots in a row), and a domain of
+    // dotted names ending in two or more letters. Plain ASCII: what nearly every address is, and nothing that could be taken for a path or markup.
+    [GeneratedRegex(@"^[a-z0-9](?:[a-z0-9._%+-]{0,62}[a-z0-9])?@(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$")]
+    private static partial Regex ValidEmail();
 
     /// <summary>
-    /// The form a username is kept in: trimmed and lower case, so "Sam " and "sam" are one person. Null if it is not a usable name
-    /// (3 to 32 letters, digits, dots, dashes and underscores).
+    /// The form an account's name is kept in: the person's email address, trimmed and in lower case, so " Sam@Example.com " and "sam@example.com" are
+    /// one person. Null if it is not a usable address. Nothing is ever sent to it: it only names the account, and the person running the service
+    /// makes the account by hand.
     /// </summary>
     public static string? Normalize(string? name)
     {
         var normal = (name ?? "").Normalize(NormalizationForm.FormKC).Trim().ToLowerInvariant();
-        return ValidName().IsMatch(normal) ? normal : null;
+        return normal.Length <= 254 && !normal.Contains("..", StringComparison.Ordinal) && ValidEmail().IsMatch(normal) ? normal : null;
     }
 
     private void Refresh()

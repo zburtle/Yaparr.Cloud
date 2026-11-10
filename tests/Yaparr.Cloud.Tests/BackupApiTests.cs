@@ -77,7 +77,7 @@ public sealed class BackupApiTests : ServiceTest
     public async Task A_backup_saved_comes_back_the_same()
     {
         var client = Start();
-        var sam = Register("sam");
+        var sam = Register("sam@example.com");
         var body = Locked(200_000);
 
         var put = await Send(client, sam, HttpMethod.Put, "/v1/backup", body, ifMatch: 0);
@@ -98,7 +98,7 @@ public sealed class BackupApiTests : ServiceTest
     public async Task Nothing_is_answered_without_a_token(string? token)
     {
         var client = Start();
-        Register("sam");
+        Register("sam@example.com");
         foreach (var (method, path) in new[] { (HttpMethod.Get, "/v1/backup"), (HttpMethod.Get, "/v1/backup/versions"), (HttpMethod.Delete, "/v1/backup"), (HttpMethod.Delete, "/v1/token") })
             Assert.Equal(HttpStatusCode.Unauthorized, (await Send(client, token, method, path)).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await Send(client, token, HttpMethod.Put, "/v1/backup", Locked(), ifMatch: 0)).StatusCode);
@@ -109,8 +109,8 @@ public sealed class BackupApiTests : ServiceTest
     public async Task One_account_cannot_see_or_remove_another_accounts_backup()
     {
         var client = Start();
-        var sam = Register("sam");
-        var alex = Register("alex");
+        var sam = Register("sam@example.com");
+        var alex = Register("alex@example.com");
         await Send(client, sam, HttpMethod.Put, "/v1/backup", Locked(), ifMatch: 0);
 
         Assert.Equal(HttpStatusCode.NotFound, (await Send(client, alex, HttpMethod.Get, "/v1/backup")).StatusCode);
@@ -122,8 +122,8 @@ public sealed class BackupApiTests : ServiceTest
     public async Task A_removed_account_and_a_signed_out_device_are_refused()
     {
         var client = Start();
-        var sam = Register("sam");
-        var second = new AccountDirectory(Options).IssueToken("sam", "Another device")!;
+        var sam = Register("sam@example.com");
+        var second = new AccountDirectory(Options).IssueToken("sam@example.com", "Another device")!;
         Assert.Equal(HttpStatusCode.Created, (await Send(client, sam, HttpMethod.Put, "/v1/backup", Locked(), ifMatch: 0)).StatusCode);
 
         // One device signs out: it is refused, the other carries on.
@@ -131,7 +131,7 @@ public sealed class BackupApiTests : ServiceTest
         Assert.Equal(HttpStatusCode.Unauthorized, (await Send(client, second, HttpMethod.Get, "/v1/backup")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await Send(client, sam, HttpMethod.Get, "/v1/backup")).StatusCode);
 
-        new AccountDirectory(Options).Remove("sam");           // by the admin, while the service runs
+        new AccountDirectory(Options).Remove("sam@example.com");           // by the admin, while the service runs
         Assert.Equal(HttpStatusCode.Unauthorized, (await Send(client, sam, HttpMethod.Get, "/v1/backup")).StatusCode);
     }
 
@@ -139,7 +139,7 @@ public sealed class BackupApiTests : ServiceTest
     public async Task A_plain_backup_is_never_stored()
     {
         var client = Start();
-        var sam = Register("sam");
+        var sam = Register("sam@example.com");
         var zip = new byte[] { 0x50, 0x4B, 3, 4, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
         Assert.Equal(HttpStatusCode.BadRequest, (await Send(client, sam, HttpMethod.Put, "/v1/backup", zip, ifMatch: 0)).StatusCode);
         Assert.Empty(BackupFiles());
@@ -151,7 +151,7 @@ public sealed class BackupApiTests : ServiceTest
     public async Task A_save_must_say_what_it_is_based_on_and_two_devices_cannot_overwrite_each_other()
     {
         var client = Start();
-        var sam = Register("sam");
+        var sam = Register("sam@example.com");
 
         Assert.Equal((HttpStatusCode)428, (await Send(client, sam, HttpMethod.Put, "/v1/backup", Locked())).StatusCode);
         Assert.Equal(HttpStatusCode.Created, (await Send(client, sam, HttpMethod.Put, "/v1/backup", Locked(), ifMatch: 0)).StatusCode);
@@ -168,9 +168,9 @@ public sealed class BackupApiTests : ServiceTest
     public async Task The_list_of_versions_says_whose_it_is()
     {
         var client = Start();
-        var sam = Register("sam");
+        var sam = Register("sam@example.com");
         var answer = await (await Send(client, sam, HttpMethod.Get, "/v1/backup/versions")).Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("sam", answer.GetProperty("username").GetString());
+        Assert.Equal("sam@example.com", answer.GetProperty("username").GetString());
         Assert.Equal(0, answer.GetProperty("versions").GetArrayLength());
     }
 
@@ -178,7 +178,7 @@ public sealed class BackupApiTests : ServiceTest
     public async Task Only_the_newest_versions_are_kept_and_an_old_one_can_be_fetched()
     {
         var client = Start(new() { ["KeepVersions"] = "3", ["WritesPerHour"] = "100" });
-        var sam = Register("sam");
+        var sam = Register("sam@example.com");
         var bodies = Enumerable.Range(0, 5).Select(_ => Locked()).ToArray();
         for (int i = 0; i < bodies.Length; i++)
             Assert.Equal(HttpStatusCode.Created, (await Send(client, sam, HttpMethod.Put, "/v1/backup", bodies[i], ifMatch: i)).StatusCode);
@@ -193,7 +193,7 @@ public sealed class BackupApiTests : ServiceTest
     public async Task A_backup_over_the_size_limit_is_refused_and_leaves_nothing()
     {
         var client = Start(new() { ["MaxBlobBytes"] = "5000" });
-        var sam = Register("sam");
+        var sam = Register("sam@example.com");
         Assert.Equal(HttpStatusCode.Created, (await Send(client, sam, HttpMethod.Put, "/v1/backup", Locked(4000), ifMatch: 0)).StatusCode);
         Assert.Equal((HttpStatusCode)413, (await Send(client, sam, HttpMethod.Put, "/v1/backup", Locked(6000), ifMatch: 1)).StatusCode);
         Assert.DoesNotContain(BackupFiles(), f => f.EndsWith(".tmp"));
@@ -203,8 +203,8 @@ public sealed class BackupApiTests : ServiceTest
     public async Task Saving_is_limited_per_hour_for_an_account_and_not_for_another()
     {
         var client = Start(new() { ["WritesPerHour"] = "2" });
-        var sam = Register("sam");
-        var alex = Register("alex");
+        var sam = Register("sam@example.com");
+        var alex = Register("alex@example.com");
         Assert.Equal(HttpStatusCode.Created, (await Send(client, sam, HttpMethod.Put, "/v1/backup", Locked(), ifMatch: 0)).StatusCode);
         Assert.Equal(HttpStatusCode.Created, (await Send(client, sam, HttpMethod.Put, "/v1/backup", Locked(), ifMatch: 1)).StatusCode);
         Assert.Equal(HttpStatusCode.TooManyRequests, (await Send(client, sam, HttpMethod.Put, "/v1/backup", Locked(), ifMatch: 2)).StatusCode);
@@ -225,7 +225,7 @@ public sealed class BackupApiTests : ServiceTest
     public async Task Deleting_removes_every_version()
     {
         var client = Start();
-        var sam = Register("sam");
+        var sam = Register("sam@example.com");
         await Send(client, sam, HttpMethod.Put, "/v1/backup", Locked(), ifMatch: 0);
         await Send(client, sam, HttpMethod.Put, "/v1/backup", Locked(), ifMatch: 1);
 
@@ -242,8 +242,8 @@ public sealed class BackupApiTests : ServiceTest
         Assert.Throws<ArgumentException>(() => store.Versions("../../etc"));
         Assert.Throws<ArgumentException>(() => store.Versions(new string('A', 64)));   // upper case is not what FolderOf makes
         Assert.Empty(store.Versions(new string('a', 64)));
-        Assert.Matches("^[0-9a-f]{64}$", BackupStore.FolderOf("sam"));
-        Assert.NotEqual(BackupStore.FolderOf("sam"), BackupStore.FolderOf("alex"));
+        Assert.Matches("^[0-9a-f]{64}$", BackupStore.FolderOf("sam@example.com"));
+        Assert.NotEqual(BackupStore.FolderOf("sam@example.com"), BackupStore.FolderOf("alex@example.com"));
     }
 
     [Fact]

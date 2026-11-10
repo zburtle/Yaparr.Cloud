@@ -8,9 +8,9 @@ public static class AdminCommands
 {
     public const string Usage =
         "Usage:\n" +
-        "  accounts add <username> [--password <password>]        make an account; without a password one is made up and shown once\n" +
-        "  accounts password <username> [--password <password>]   give an account a new password and sign its devices out\n" +
-        "  accounts remove <username> [--keep-backup]             remove an account and, unless told not to, its backup\n" +
+        "  accounts add <email> [--password <password>]           make an account (named by the person's email address); without a password one is made up and shown once\n" +
+        "  accounts password <email> [--password <password>]      give an account a new password and sign its devices out\n" +
+        "  accounts remove <email> [--keep-backup]                remove an account and, unless told not to, its backup\n" +
         "  accounts list                                          who has an account, their devices, and the space each uses\n";
 
     public static async Task<int> RunAsync(string[] args, ServiceOptions options, TextWriter output)
@@ -27,7 +27,7 @@ public static class AdminCommands
             {
                 if (rest.Count == 0) { output.Write(Usage); return 2; }
                 var name = AccountDirectory.Normalize(rest[0]);
-                if (name == null) { output.WriteLine("That is not a usable username: 3 to 32 letters, digits, dots, dashes or underscores."); return 2; }
+                if (name == null) { output.WriteLine("That is not a usable email address. An account is named by the email address of its owner, like sam@example.com."); return 2; }
                 var password = Option(rest, "--password");
                 var made = password == null;
                 password ??= Passwords.Generate();
@@ -67,6 +67,8 @@ public static class AdminCommands
                 if (all.Count == 0) output.WriteLine("No accounts yet.");
                 foreach (var account in all)
                 {
+                    if (AccountDirectory.Normalize(account.Name) != account.Name)
+                        output.WriteLine($"{account.Name}  is not an email address, so it cannot sign in any more: remove it and add the person again with their address.");
                     var versions = store.Versions(BackupStore.FolderOf(account.Name));
                     var size = versions.Sum(v => v.Size);
                     output.WriteLine($"{account.Name,-32} made {account.Created:yyyy-MM-dd}  " +

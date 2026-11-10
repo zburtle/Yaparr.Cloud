@@ -15,7 +15,7 @@ public sealed record LoginRequest(string RedirectUri, string Challenge, string S
 /// <list type="number">
 /// <item>The app listens on a port of its own computer, makes a random <c>verifier</c>, and opens the browser at
 /// <c>/login?redirect_uri=http://127.0.0.1:port/…&amp;code_challenge=SHA-256(verifier)&amp;state=…</c>.</item>
-/// <item>The person types their username and password into the page. The app never sees them.</item>
+/// <item>The person types their email address and password into the page. The app never sees them.</item>
 /// <item>The browser is sent back to the app's port with a <c>code</c> that works once, for two minutes.</item>
 /// <item>The app trades the code and its verifier for a token (<c>POST /v1/token</c>) and uses the token from then on.</item>
 /// </list>
@@ -154,8 +154,8 @@ public static class Pages
         <input type="hidden" name="code_challenge" value="{E(request.Challenge)}">
         <input type="hidden" name="state" value="{E(request.State)}">
         <input type="hidden" name="device" value="{E(request.Device)}">
-        <label for="username">Username</label>
-        <input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required value="{E(username)}"{(username.Length == 0 ? " autofocus" : "")}>
+        <label for="username">Email address</label>
+        <input id="username" name="username" type="email" autocomplete="username email" autocapitalize="none" spellcheck="false" maxlength="254" required value="{E(username)}"{(username.Length == 0 ? " autofocus" : "")}>
         <label for="password">Password</label>
         <input id="password" name="password" type="password" autocomplete="current-password" required{(username.Length == 0 ? "" : " autofocus")}>
         <button type="submit">Sign in</button>
@@ -168,8 +168,8 @@ public static class Pages
         <p class="muted">This signs every device out, so sign in again from Yaparr afterwards. Your backups are not affected: they are locked with your recovery code, not with this password.</p>
         {(problem == null ? "" : $"<p class=\"problem\" role=\"alert\">{E(problem)}</p>")}
         <form method="post" action="/account/password">
-        <label for="username">Username</label>
-        <input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required value="{E(username)}">
+        <label for="username">Email address</label>
+        <input id="username" name="username" type="email" autocomplete="username email" autocapitalize="none" spellcheck="false" maxlength="254" required value="{E(username)}">
         <label for="current">Current password</label>
         <input id="current" name="current" type="password" autocomplete="current-password" required>
         <label for="new">New password (at least {Passwords.MinLength} characters)</label>

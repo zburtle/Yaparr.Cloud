@@ -133,6 +133,7 @@ public static class Pages
         p { margin: 8px 0 16px; }
         label { display: block; font-size: 14px; margin: 14px 0 4px; }
         input { box-sizing: border-box; width: 100%; font: inherit; padding: 9px 10px; border: 1px solid GrayText; border-radius: 6px; background: Field; color: FieldText; }
+        a.button { display: block; box-sizing: border-box; text-align: center; text-decoration: none; margin-top: 8px; padding: 10px; border-radius: 6px; background: #4f6ef7; color: #fff; font-weight: 600; }
         button { margin-top: 20px; width: 100%; font: inherit; font-weight: 600; padding: 10px; border: 0; border-radius: 6px; background: #4f6ef7; color: #fff; cursor: pointer; }
         .problem { color: #d93b3b; font-weight: 600; }
         .muted { opacity: .7; font-size: 14px; }
@@ -195,10 +196,15 @@ public static class Pages
         <p class="muted">Your backups are locked with a recovery code that Yaparr makes on your computer, not with this password, so the server cannot read them.</p>
         """);
 
-    public static string Welcome(string email, string server) => Page("You're in", $"""
+    /// <param name="appLink">The link that opens Yaparr and signs it in (<see cref="SignInHandoff.AppLink"/>), or null where it cannot work (a phone: the Android app has no backup server yet).</param>
+    public static string Welcome(string email, string server, string? appLink = null) => Page("You're in", $"""
         <h1>You're in</h1>
         <p>The account <strong>{E(email)}</strong> is ready, with a lifetime pass.</p>
-        <p>To use it, open Yaparr and go to <strong>Settings &gt; Backup &gt; Backup server</strong>. Type this address, choose <strong>Sign in with your browser</strong>, and sign in with your email address and the password you just chose:</p>
+        {(appLink == null ? "" : $"""
+        <p><a class="button" href="{E(appLink)}">Open Yaparr and sign in</a></p>
+        <p class="muted">This opens Yaparr on this computer, which asks you to confirm before it signs in; you do not have to type your password again. It works once, for five minutes. If nothing happens, Yaparr is not installed or needs updating: <a href="https://yaparr.com">get it here</a>, and use the steps below.</p>
+        """)}
+        <p>{(appLink == null ? "To use it" : "Or, to do it by hand")}, open Yaparr and go to <strong>Settings &gt; Backup &gt; Backup server</strong>. Type this address, choose <strong>Sign in with your browser</strong>, and sign in with your email address and the password you just chose:</p>
         <p><strong>{E(server)}</strong></p>
         <p class="muted">You can change your password later at <a href="/account/password">{E(server)}/account/password</a>.</p>
         """);

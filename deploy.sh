@@ -2,12 +2,13 @@
 # Deploys the service on this machine: gets the code of a branch, rebuilds and restarts the service, waits for it to be healthy, and if it does not
 # become healthy goes back to what was running before. Run it in the folder of the clone, or by name (it finds its own folder).
 #
-#   ./deploy.sh                          deploy master
-#   DEPLOY_BRANCH=some-branch ./deploy.sh
-#   DEPLOY_HEALTH_TIMEOUT=60 ./deploy.sh   seconds to wait for "healthy" (default 120)
+#   ./deploy.sh deploy                    deploy master
+#   ./deploy.sh check                     say what is running, and deploy nothing
+#   DEPLOY_BRANCH=some-branch ./deploy.sh deploy
+#   DEPLOY_HEALTH_TIMEOUT=60 ./deploy.sh deploy   seconds to wait for "healthy" (default 120)
 #
-# GitHub Actions runs it over SSH with a key that can run nothing else (a forced command in authorized_keys, see docs/setup-guide.md). The client's
-# command arrives in SSH_ORIGINAL_COMMAND: "check" only says how things stand and deploys nothing; anything else deploys master.
+# GitHub Actions runs it over SSH with a key that can run nothing else (a forced command in authorized_keys, see docs/setup-guide.md). What the client
+# asked for arrives in SSH_ORIGINAL_COMMAND, and only "deploy" and "check" are accepted: with no command, or any other, nothing happens.
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 
@@ -25,12 +26,20 @@ wait_healthy() {
   return 1
 }
 
-if [ "${SSH_ORIGINAL_COMMAND:-}" = "check" ]; then
-  echo "branch: $(git branch --show-current)"
-  echo "commit: $(git log --oneline -1)"
-  echo "service: $(health)"
-  exit 0
-fi
+action="${SSH_ORIGINAL_COMMAND:-${1:-}}"
+case "$action" in
+  check)
+    echo "branch: $(git branch --show-current)"
+    echo "commit: $(git log --oneline -1)"
+    echo "service: $(health)"
+    exit 0
+    ;;
+  deploy) ;;
+  *)
+    echo "usage: deploy.sh deploy | check" >&2
+    exit 2
+    ;;
+esac
 
 # Where to go back to: the branch that is checked out, or the commit if none is.
 previous="$(git symbolic-ref -q --short HEAD || git rev-parse HEAD)"

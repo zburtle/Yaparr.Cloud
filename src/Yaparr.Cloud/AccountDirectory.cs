@@ -6,7 +6,8 @@ using System.Text.RegularExpressions;
 
 namespace Yaparr.Cloud;
 
-public sealed record AccountEntry(string Name, DateTimeOffset Created, int Devices, bool HasPassword);
+/// <summary>An account as the admin sees it. <paramref name="Pass"/> is what kind of pass it has ("lifetime" for everyone so far).</summary>
+public sealed record AccountEntry(string Name, DateTimeOffset Created, int Devices, bool HasPassword, string Pass, string? SignupCode);
 
 /// <summary>
 /// Who may use the service (<c>accounts.json</c> in the data folder): each account, named by its owner's email address, with the hash of its password and the devices that are signed
@@ -23,11 +24,21 @@ public sealed partial class AccountDirectory
         public DateTimeOffset Created { get; set; }
     }
 
+    /// <summary>The pass every account has: it does not run out. (Nothing here ends an account on a date; the field says what the person was promised.)</summary>
+    public const string LifetimePass = "lifetime";
+
     private sealed class Entry
     {
         public string? PasswordHash { get; set; }
         public DateTimeOffset Created { get; set; }
         public List<Device> Devices { get; set; } = new();
+        /// <summary>What kind of pass this account has. Accounts from before passes were recorded are lifetime ones.</summary>
+        public string Pass { get; set; } = LifetimePass;
+        /// <summary>The id of the signup code the person used, if they signed up with one.</summary>
+        public string? SignupCode { get; set; }
+        /// <summary>For an account made by signing up that has not chosen a password yet: the hash of the one-use token that lets them, and when it ends.</summary>
+        public string? SetupHash { get; set; }
+        public DateTimeOffset? SetupExpires { get; set; }
     }
 
     private sealed class FileModel
@@ -104,13 +115,19 @@ public sealed partial class AccountDirectory
         lock (_gate) { Refresh(); return _users.ContainsKey(name); }
     }
 
+    /// <summary>True if the account exists and has chosen a password, so it is for signing in and not for signing up.</summary>
+    public bool HasPassword(string name)
+    {
+        lock (_gate) { Refresh(); return _users.TryGetValue(name, out var entry) && entry.PasswordHash != null; }
+    }
+
     public IReadOnlyList<AccountEntry> List()
     {
         lock (_gate)
         {
             Refresh();
             return _users.OrderBy(u => u.Key, StringComparer.Ordinal)
-                .Select(u => new AccountEntry(u.Key, u.Value.Created, u.Value.Devices.Count, u.Value.PasswordHash != null)).ToList();
+                .Select(u => new AccountEntry(u.Key, u.Value.Created, u.Value.Devices.Count, u.Value.PasswordHash != null, u.Value.Pass, u.Value.SignupCode)).ToList();
         }
     }
 
@@ -125,6 +142,61 @@ public sealed partial class AccountDirectory
             _users[name] = new Entry { PasswordHash = hash, Created = DateTimeOffset.UtcNow };
             Save();
             return true;
+        }
+    }
+
+    private static readonly TimeSpan SetupLifetime = TimeSpan.FromMinutes(30);
+
+    /// <summary>
+    /// Begins an account made by signing up: it exists, with a lifetime pass, but cannot sign in until the person has chosen a password with the one-use
+    /// token returned here (kept only as a hash, good for 30 minutes). Someone who comes back for the same address before choosing a password is given
+    /// a new token, and the old one stops working. Null if the address already has an account with a password, which is for signing in.
+    /// </summary>
+    public string? StartSignup(string name, string? signupCodeId)
+    {
+        var token = "set_" + Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));
+        lock (_gate)
+        {
+            Refresh();
+            if (!_users.TryGetValue(name, out var entry))
+                _users[name] = entry = new Entry { Created = DateTimeOffset.UtcNow, Pass = LifetimePass, SignupCode = signupCodeId };
+            else if (entry.PasswordHash != null) return null;
+            entry.SetupHash = HashOf(token);
+            entry.SetupExpires = DateTimeOffset.UtcNow + SetupLifetime;
+            Save();
+        }
+        return token;
+    }
+
+    /// <summary>The account a setup token is for, or null if it is not one, has been used, or has run out. Does not use it.</summary>
+    public string? SetupFor(string? token)
+    {
+        if (token == null || !token.StartsWith("set_", StringComparison.Ordinal) || token.Length > 100) return null;
+        var hash = HashOf(token);
+        lock (_gate)
+        {
+            Refresh();
+            return _users.FirstOrDefault(u => u.Value.SetupHash == hash && u.Value.SetupExpires > DateTimeOffset.UtcNow).Key;
+        }
+    }
+
+    /// <summary>Gives the account a setup token is for its password, once. Returns the account, or null if the token is not good.</summary>
+    public string? FinishSetup(string? token, string password)
+    {
+        if (SetupFor(token) is null) return null;
+        var hash = Passwords.Hash(password);   // slow on purpose, so outside the lock
+        lock (_gate)
+        {
+            Refresh();
+            var tokenHash = HashOf(token!);
+            var found = _users.FirstOrDefault(u => u.Value.SetupHash == tokenHash && u.Value.SetupExpires > DateTimeOffset.UtcNow);
+            if (found.Value == null) return null;
+            found.Value.PasswordHash = hash;
+            found.Value.Devices.Clear();
+            found.Value.SetupHash = null;
+            found.Value.SetupExpires = null;
+            Save();
+            return found.Key;
         }
     }
 

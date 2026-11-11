@@ -32,6 +32,26 @@ dotnet Yaparr.Cloud.dll accounts list
 
 An account whose name is not an email address (from before accounts were named by one) cannot sign in, and `accounts list` says so: add the person again with their address. An account made by the first version of the service (which kept a public key and no password) shows as `NO PASSWORD` in the list and cannot sign in until `accounts password <name>` gives it one. Backups from that version were locked with the old password, not a recovery code.
 
+### Signup codes: friends sign themselves up
+
+Instead of making every account by hand, make a **code** and send a link with it in. Anyone with the link can sign up, and **one code can be used by many people** (any number, unless you give it a limit). Everyone who signs up gets a **lifetime pass**: the account's `pass` is `lifetime`, which is recorded and shown in `accounts list`. (Nothing here ends an account on a date.)
+
+```
+dotnet Yaparr.Cloud.dll codes add [--note "who it is for"] [--uses 10] [--days 30]
+dotnet Yaparr.Cloud.dll codes list
+dotnet Yaparr.Cloud.dll codes revoke <id>
+```
+
+`codes add` prints the code and the link, once: only a hash of the code is kept, so it cannot be shown again (the `id` that `list` shows is only for telling codes apart and revoking them). `--uses` limits how many people can use it, `--days` how long it works. `codes list` shows each code, whether it still works (`works`, `used up`, `expired`, `revoked`), and who signed up with it. `revoke` stops a code; the people who already signed up keep their accounts.
+
+The link is the sign-up page on the website with the server and the code in the fragment (`https://yaparr.com/signup#server=…&code=…`), so neither reaches the website's host. `PublicUrl` (this service's address) and `SignupPageUrl` (the page on the website) come from `appsettings.json`, which is part of every build and image: they are **`https://cloud.yaparr.com`** and `https://yaparr.com/signup`, so the link comes out whole. Set `Service__PublicUrl` or `Service__SignupPageUrl` to change them for another deployment; the app ships with the same server address in its own `yaparr.release.json`.
+
+What the friend does: opens the link, types their email address and presses Sign up. The page posts the address and the code straight to this service (`POST /signup`, an ordinary form, so no CORS is involved), which makes the account and shows **its own page** to choose a password. So the password is typed on this service's page and never passes through the website. The link then tells them to open Yaparr and sign in to the backup server. Nothing is emailed anywhere.
+
+- A code that is revoked, expired, used up or never existed all get the same answer, and eight wrong codes from one address block it for a quarter of an hour.
+- An address that already has an account is told to sign in. An address that signed up but has not yet chosen a password can come back with the link and gets a fresh page (the old one stops working; it is not counted as another use). The page that chooses the password works once and for 30 minutes.
+- Anyone with the link can sign up with *any* email address, so send a code to people you trust, give a code a limit or an end date, and revoke it when you are done.
+
 ### Signing in (`LoginFlow`)
 
 The way programs on a computer sign in to web services: OAuth's authorization code with PKCE, cut down to what is needed.
@@ -47,6 +67,8 @@ The pages are plain HTML with no scripts, are never cached or framed, and everyt
 
 | | | |
 |---|---|---|
+| `POST /signup` | form: `email`, `code` | the page to choose a password (an account without one is made), or why the code does not work |
+| `POST /account/setup` | form: `token`, `password`, `again` | the welcome page; the token works once, for 30 minutes |
 | `GET /login`, `POST /login` | the sign-in page (see above) | `302` back to the app with `code` and `state` |
 | `POST /v1/token` | `{"code","verifier"}` | `{token, username}`; `400` if the code is spent, late or the verifier is wrong |
 | `DELETE /v1/token` | `Authorization: Bearer <token>` | `204`; signs that device out |
@@ -61,13 +83,13 @@ Everything under `/v1/backup` needs `Authorization: Bearer <token>`; without a t
 
 ### Limits (`appsettings.json`, section `Service`, or `Service__Name` environment variables)
 
-`MaxBlobBytes` (512 MiB), `KeepVersions` (5), `RequestsPerMinute` per address (120), `WritesPerHour` per account (12), `DataDirectory` (`data`), `BehindProxy`.
+`MaxBlobBytes` (512 MiB), `KeepVersions` (5), `RequestsPerMinute` per address (120), `WritesPerHour` per account (12), `DataDirectory` (`data`), `PublicUrl` (`https://cloud.yaparr.com`), `SignupPageUrl` (`https://yaparr.com/signup`), `BehindProxy`.
 
 Set `BehindProxy` to `true` only when a reverse proxy is in front (it should be, for https): then the caller's address comes from `X-Forwarded-For`. Left on without a proxy, anyone can claim any address.
 
 ### Storage
 
-Files, one folder per account (the hex SHA-256 of its email address) with numbered versions, written to a temporary file and moved into place. `BackupStore` is the only thing that touches them, so S3 or similar can replace it later. `accounts.json` beside them holds the usernames, password hashes and token hashes.
+Files, one folder per account (the hex SHA-256 of its email address) with numbered versions, written to a temporary file and moved into place. `BackupStore` is the only thing that touches them, so S3 or similar can replace it later. `accounts.json` beside them holds the email addresses, password hashes, token hashes and passes, and `codes.json` the signup codes (as hashes) and who used them.
 
 ### Not done yet
 
@@ -78,18 +100,19 @@ Files, one folder per account (the hex SHA-256 of its email address) with number
 
 ## Running it with Docker
 
-`docker-compose.yml` runs the service on its own, on plain http. Put your own reverse proxy in front of it for https.
+**The whole setup, from a new DigitalOcean droplet to friends signing up, is in [docs/setup-guide.md](docs/setup-guide.md).**
+
+`docker-compose.yml` runs the service with Caddy in front of it, which gets and renews an https certificate for `DOMAIN` (`cloud.yaparr.com` unless `.env` says otherwise).
 
 ```
 docker compose up -d --build
-docker compose exec cloud dotnet Yaparr.Cloud.dll accounts add sam
+docker compose exec cloud dotnet Yaparr.Cloud.dll accounts add you@example.com
 ```
 
-Then send your domain to `http://127.0.0.1:8080` in the proxy. Friends use `https://<your domain>` as the server address. Everything (the account list and every backup) is in the `cloud-data` volume, so that is what to back up.
+Point a DNS name at the machine and open ports 80 and 443 first. Everything (the accounts, the signup codes and every backup) is in the `cloud-data` volume, so that is what to back up.
 
-- **Ports:** `SERVICE_PORT` (8080) and `SERVICE_BIND` (`127.0.0.1`, this computer only) are set in `.env` (see `.env.example`). `0.0.0.0` opens it to other computers as plain http, so only on a network you trust.
-- **A proxy in a container:** it cannot reach `127.0.0.1` of the host. The compose file has a commented-out shared network for that: the proxy then sends to `http://cloud:8080`.
-- **The proxy must** set `X-Forwarded-For` (most do), or every caller looks like the proxy and shares one rate limit, and it must allow request bodies as large as `Service__MaxBlobBytes` (512 MiB by default).
+- **Ports** are set in `.env` (see `.env.example`): `HTTP_PORT` and `HTTPS_PORT` for Caddy (80 and 443; Caddy needs them reachable from the internet to get a certificate), and `SERVICE_PORT` and `SERVICE_BIND` for the service itself (8080 on `127.0.0.1`, this computer only).
+- **With a proxy of your own instead of Caddy**, start only the service (`docker compose up -d --build cloud`) and point your proxy at `http://127.0.0.1:8080`. A proxy in a container cannot reach `127.0.0.1` of the host: put them on a shared Docker network, or use the host's address with `SERVICE_BIND=0.0.0.0` (plain http, so only on a network you trust). The proxy must set `X-Forwarded-For` (most do) and allow request bodies as large as `Service__MaxBlobBytes` (512 MiB by default).
 - **Settings** are the `Service__...` environment variables in the compose file. Keep `Service__BehindProxy=true` while a proxy is in front.
 - **Komodo:** a Stack with a Git Repo source, this repository and `docker-compose.yml` works as it is.
 

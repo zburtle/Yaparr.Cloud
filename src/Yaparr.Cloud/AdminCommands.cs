@@ -13,6 +13,82 @@ public static class AdminCommands
         "  accounts remove <email> [--keep-backup]                remove an account and, unless told not to, its backup\n" +
         "  accounts list                                          who has an account, their devices, and the space each uses\n";
 
+    public const string CodesUsage =
+        "Usage:\n" +
+        "  codes add [--note <who it is for>] [--uses <how many people>] [--days <how long it works>]\n" +
+        "                                  make a signup code and the link to send; one code can be used by many people (any number unless --uses)\n" +
+        "  codes list                      the codes, who used each, and whether it still works\n" +
+        "  codes revoke <id>               stop a code working (people who signed up with it keep their accounts)\n";
+
+    public static Task<int> RunCodesAsync(string[] args, ServiceOptions options, TextWriter output) => RunCodesAsync(args, options, output, DateTimeOffset.UtcNow);
+
+    internal static Task<int> RunCodesAsync(string[] args, ServiceOptions options, TextWriter output, DateTimeOffset now)
+    {
+        var codes = new SignupCodes(options, () => now);
+        var command = args.FirstOrDefault()?.ToLowerInvariant();
+        var rest = args.Skip(1).ToList();
+        switch (command)
+        {
+            case "add":
+            {
+                int? uses = null;
+                TimeSpan? lifetime = null;
+                if (Option(rest, "--uses") is { } usesText)
+                {
+                    if (!int.TryParse(usesText, out var n) || n < 1) { output.WriteLine("--uses has to be a number of people, 1 or more."); return Task.FromResult(2); }
+                    uses = n;
+                }
+                if (Option(rest, "--days") is { } daysText)
+                {
+                    if (!int.TryParse(daysText, out var d) || d < 1 || d > 3650) { output.WriteLine("--days has to be a number of days, 1 to 3650."); return Task.FromResult(2); }
+                    lifetime = TimeSpan.FromDays(d);
+                }
+                var (code, info) = codes.Create(Option(rest, "--note") ?? "", uses, lifetime);
+                output.WriteLine($"Made the code {code}  (id {info.Id})");
+                output.WriteLine(uses == null ? "Any number of people can sign up with it, until you revoke it." : $"Up to {uses} people can sign up with it.");
+                if (info.Expires is { } end) output.WriteLine($"It works until {end:yyyy-MM-dd}.");
+                var server = options.PublicUrl.Trim().TrimEnd('/');
+                output.WriteLine();
+                output.WriteLine("Send this link (the code is not kept anywhere else, so this is the only time it is shown):");
+                output.WriteLine($"  {SignupLink(options, code)}");
+                if (server.Length == 0)
+                    output.WriteLine("Set Service__PublicUrl to this service's address (like https://backup.example.org) to have it filled in; until then replace <your server address> with it.");
+                return Task.FromResult(0);
+            }
+            case "list":
+            {
+                var all = codes.List();
+                if (all.Count == 0) output.WriteLine("No codes yet.");
+                foreach (var info in all)
+                {
+                    var state = info.Problem(now) ?? "works";
+                    output.WriteLine($"{info.Id}  {state,-8} made {info.Created:yyyy-MM-dd}  {info.Uses.Count}{(info.MaxUses is { } max ? $" of {max}" : "")} signed up" +
+                        (info.Expires is { } end ? $"  until {end:yyyy-MM-dd}" : "") + (info.Note.Length > 0 ? $"  \"{info.Note}\"" : ""));
+                    foreach (var use in info.Uses) output.WriteLine($"    {use.Email}  {use.At:yyyy-MM-dd HH:mm}");
+                }
+                return Task.FromResult(0);
+            }
+            case "revoke":
+            {
+                if (rest.Count == 0) { output.Write(CodesUsage); return Task.FromResult(2); }
+                if (!codes.Revoke(rest[0])) { output.WriteLine("There is no code with that id (codes list shows them)."); return Task.FromResult(1); }
+                output.WriteLine("Revoked. People who already signed up with it keep their accounts.");
+                return Task.FromResult(0);
+            }
+            default:
+                output.Write(CodesUsage);
+                return Task.FromResult(2);
+        }
+    }
+
+    /// <summary>The link to send for a code: the sign-up page on the website, with this server and the code after the # (so neither goes to the website's host).</summary>
+    public static string SignupLink(ServiceOptions options, string code)
+    {
+        var server = options.PublicUrl.Trim().TrimEnd('/');
+        var page = options.SignupPageUrl.Trim().TrimEnd('/');
+        return $"{page}#server={(server.Length == 0 ? "<your server address>" : Uri.EscapeDataString(server))}&code={code}";
+    }
+
     public static async Task<int> RunAsync(string[] args, ServiceOptions options, TextWriter output)
     {
         var accounts = new AccountDirectory(options);
@@ -72,7 +148,9 @@ public static class AdminCommands
                     var versions = store.Versions(BackupStore.FolderOf(account.Name));
                     var size = versions.Sum(v => v.Size);
                     output.WriteLine($"{account.Name,-32} made {account.Created:yyyy-MM-dd}  " +
-                        (account.HasPassword ? $"{account.Devices} device{(account.Devices == 1 ? "" : "s")} signed in" : "NO PASSWORD (run: accounts password " + account.Name + ")") + "  " +
+                        (account.HasPassword ? $"{account.Devices} device{(account.Devices == 1 ? "" : "s")} signed in"
+                            : account.SignupCode != null ? "signed up, has not chosen a password yet"
+                            : "NO PASSWORD (run: accounts password " + account.Name + ")") + $"  {account.Pass} pass" + (account.SignupCode != null ? $" (code {account.SignupCode})" : "") + "  " +
                         (versions.Count == 0 ? "no backup" : $"{versions.Count} version{(versions.Count == 1 ? "" : "s")}, {size / 1024.0 / 1024.0:0.0} MiB, last {versions[0].At:yyyy-MM-dd HH:mm}"));
                 }
                 return 0;

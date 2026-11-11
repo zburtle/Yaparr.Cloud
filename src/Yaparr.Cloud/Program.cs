@@ -5,11 +5,14 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Http.Features;
 using Yaparr.Cloud;
 
-// "accounts add|password|remove|list" looks after who may use the service and then exits; anything else runs the service.
-if (args.Length > 0 && args[0].Equals("accounts", StringComparison.OrdinalIgnoreCase))
+// "accounts add|password|remove|list" and "codes add|list|revoke" look after who may use the service and then exit; anything else runs the service.
+if (args.Length > 0 && (args[0].Equals("accounts", StringComparison.OrdinalIgnoreCase) || args[0].Equals("codes", StringComparison.OrdinalIgnoreCase)))
 {
-    var config = new ConfigurationBuilder().AddJsonFile("appsettings.json", optional: true).AddEnvironmentVariables().Build();
-    return await AdminCommands.RunAsync(args[1..], config.GetSection("Service").Get<ServiceOptions>() ?? new ServiceOptions(), Console.Out);
+    var config = new ConfigurationBuilder().SetBasePath(AppContext.BaseDirectory).AddJsonFile("appsettings.json", optional: true).AddEnvironmentVariables().Build();
+    var settings = config.GetSection("Service").Get<ServiceOptions>() ?? new ServiceOptions();
+    return args[0].Equals("codes", StringComparison.OrdinalIgnoreCase)
+        ? await AdminCommands.RunCodesAsync(args[1..], settings, Console.Out)
+        : await AdminCommands.RunAsync(args[1..], settings, Console.Out);
 }
 
 var builder = WebApplication.CreateBuilder(args);
@@ -17,6 +20,7 @@ var options = builder.Configuration.GetSection("Service").Get<ServiceOptions>() 
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton<BackupStore>();
 builder.Services.AddSingleton<AccountDirectory>();
+builder.Services.AddSingleton<SignupCodes>();
 builder.Services.AddSingleton<WriteLimiter>();
 builder.Services.AddSingleton<LoginFlow>();
 builder.Services.AddSingleton<LoginLimiter>();
@@ -117,6 +121,56 @@ app.MapPost("/account/password", async (HttpContext http, AccountDirectory accou
     limiter.Succeeded(name);
     await Task.Run(() => accounts.SetPassword(name, replacement));
     return Html(http, Pages.Message("Password changed", "Every device was signed out. Open Yaparr and sign in again with the new password. Your backups are untouched."));
+}).DisableAntiforgery();
+
+// ---- signing up, with a code from a link (the page on the website posts here) ----
+
+// The website's page collects an email address and the code from the link and posts them here, so the code goes to this server and not to the
+// website, and the password is chosen on this server's own page below and never passes through the website.
+app.MapPost("/signup", async (HttpContext http, AccountDirectory accounts, SignupCodes codes, LoginLimiter limiter) =>
+{
+    var form = await http.Request.ReadFormAsync();
+    var who = "ip:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+    if (limiter.IsBlocked(who))
+        return Html(http, Pages.Message("Too many tries", "Wait a quarter of an hour and try again."), StatusCodes.Status429TooManyRequests);
+
+    const string badCode = "This sign-up link does not work. It may have been used up, expired or taken back. Ask the person who sent it for a new one.";
+    if (AccountDirectory.Normalize(form["email"].ToString()) is not { } email)
+        return Html(http, Pages.Message("That email address does not look right", "Go back and check it."), StatusCodes.Status400BadRequest);
+    if (codes.Check(form["code"].ToString(), email) is null)
+    {
+        limiter.Failed(who);
+        return Html(http, Pages.Message("This link does not work", badCode), StatusCodes.Status403Forbidden);
+    }
+    if (accounts.HasPassword(email))
+        return Html(http, Pages.Message("You already have an account", "That email address already has an account here. Open Yaparr and sign in to the backup server with it."), StatusCodes.Status409Conflict);
+
+    // Counted against the code once for a person, even if they come back to finish.
+    if (codes.Use(form["code"].ToString(), email) is not { } codeId || accounts.StartSignup(email, codeId) is not { } token)
+    {
+        limiter.Failed(who);
+        return Html(http, Pages.Message("This link does not work", badCode), StatusCodes.Status403Forbidden);
+    }
+    return Html(http, Pages.SetPassword(token, email, null));
+}).DisableAntiforgery();
+
+app.MapPost("/account/setup", async (HttpContext http, AccountDirectory accounts, LoginLimiter limiter) =>
+{
+    var form = await http.Request.ReadFormAsync();
+    var token = form["token"].ToString();
+    string password = form["password"].ToString(), again = form["again"].ToString();
+    if (accounts.SetupFor(token) is not { } email)
+        return Html(http, Pages.Message("This page has run out", "Go back to your sign-up link and start again."), StatusCodes.Status400BadRequest);
+
+    IResult Retry(string problem) => Html(http, Pages.SetPassword(token, email, problem), StatusCodes.Status400BadRequest);
+    if (Passwords.Check(password) is { } weak) return Retry(weak);
+    if (password.Length > 1000) return Retry("That password is too long.");
+    if (password != again) return Retry("The two passwords are not the same.");
+    if (await Task.Run(() => accounts.FinishSetup(token, password)) is not { } done)
+        return Html(http, Pages.Message("This page has run out", "Go back to your sign-up link and start again."), StatusCodes.Status400BadRequest);
+
+    var server = options.PublicUrl.Length > 0 ? options.PublicUrl.TrimEnd('/') : $"{http.Request.Scheme}://{http.Request.Host}";
+    return Html(http, Pages.Welcome(done, server));
 }).DisableAntiforgery();
 
 // ---- the backup, for an app that is signed in (Authorization: Bearer <token>) ----

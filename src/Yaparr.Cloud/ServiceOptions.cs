@@ -18,6 +18,12 @@ public sealed class ServiceOptions
     /// <summary>Backups saved per hour by one account (or address).</summary>
     public int WritesPerHour { get; set; } = 12;
 
+    /// <summary>The address people reach this service at, like <c>https://backup.example.org</c>. It goes into the sign-up links the admin makes, and into what a new account is told to type into Yaparr. Without it, the address of the request is used for the second, and the first is left for the admin to fill in.</summary>
+    public string PublicUrl { get; set; } = "";
+
+    /// <summary>The page on the website where people sign up with a code. The link the admin sends is this address with the server and the code after a <c>#</c>.</summary>
+    public string SignupPageUrl { get; set; } = "https://yaparr.com/signup";
+
     /// <summary>True when a reverse proxy sits in front (which is how it gets https), so the caller's address is read from <c>X-Forwarded-For</c>. Leave it off when the service is reachable directly, or anyone could claim any address.</summary>
     public bool BehindProxy { get; set; }
 

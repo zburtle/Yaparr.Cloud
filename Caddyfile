@@ -1,0 +1,15 @@
+# https for the service. Caddy gets a certificate for the name in DOMAIN from Let's Encrypt and renews it, and sends everything to the service.
+{$DOMAIN} {
+	# A backup can be large: allow a little more than the service's own limit (Service__MaxBlobBytes, 512 MiB), so the service answers "too big" itself.
+	request_body {
+		max_size 600MB
+	}
+	reverse_proxy cloud:8080 {
+		# Uploads and downloads of a big backup on a slow line take a while.
+		transport http {
+			response_header_timeout 15m
+			write_timeout 15m
+			read_timeout 15m
+		}
+	}
+}

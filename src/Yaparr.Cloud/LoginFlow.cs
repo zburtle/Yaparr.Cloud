@@ -180,6 +180,29 @@ public static class Pages
         </form>
         """);
 
+    public static string SetPassword(string token, string email, string? problem) => Page("Choose your password", $"""
+        <h1>Choose your password</h1>
+        <p class="muted">Your account is <strong>{E(email)}</strong>. You have a lifetime pass. The password is for signing in to this server from Yaparr; it is typed here, on this server's own page, and nowhere else.</p>
+        {(problem == null ? "" : $"<p class=\"problem\" role=\"alert\">{E(problem)}</p>")}
+        <form method="post" action="/account/setup">
+        <input type="hidden" name="token" value="{E(token)}">
+        <label for="new">Password (at least {Passwords.MinLength} characters)</label>
+        <input id="new" name="password" type="password" autocomplete="new-password" minlength="{Passwords.MinLength}" required autofocus>
+        <label for="again">Password again</label>
+        <input id="again" name="again" type="password" autocomplete="new-password" minlength="{Passwords.MinLength}" required>
+        <button type="submit">Create my account</button>
+        </form>
+        <p class="muted">Your backups are locked with a recovery code that Yaparr makes on your computer, not with this password, so the server cannot read them.</p>
+        """);
+
+    public static string Welcome(string email, string server) => Page("You're in", $"""
+        <h1>You're in</h1>
+        <p>The account <strong>{E(email)}</strong> is ready, with a lifetime pass.</p>
+        <p>To use it, open Yaparr and go to <strong>Settings &gt; Backup &gt; Backup server</strong>. Type this address, choose <strong>Sign in with your browser</strong>, and sign in with your email address and the password you just chose:</p>
+        <p><strong>{E(server)}</strong></p>
+        <p class="muted">You can change your password later at <a href="/account/password">{E(server)}/account/password</a>.</p>
+        """);
+
     public static string Message(string title, string text) => Page(title, $"""
         <h1>{E(title)}</h1>
         <p>{E(text)}</p>

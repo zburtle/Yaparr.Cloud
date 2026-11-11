@@ -17,7 +17,8 @@ services:
       # Service__PublicUrl: "https://cloud.yaparr.com"      # this service's address, for the signup links from "codes add" (this is the default in appsettings.json)
       # Service__SignupPageUrl: "https://yaparr.com/signup"  # the website page the links open (this is the default)
       # Service__MaxBlobBytes: "536870912"   # the largest backup, in bytes (512 MiB); Caddy allows a little more than this
-      # Service__KeepVersions: "5"
+      # Service__KeepVersions: "3"      # the newest versions always kept ...
+      # Service__KeepDays: "7"          # ... and the newest of each of this many days
       # Service__WritesPerHour: "12"
       # Service__RequestsPerMinute: "120"
     volumes:

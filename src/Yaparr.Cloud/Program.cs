@@ -23,6 +23,7 @@ builder.Services.AddSingleton<AccountDirectory>();
 builder.Services.AddSingleton<SignupCodes>();
 builder.Services.AddSingleton<WriteLimiter>();
 builder.Services.AddSingleton<LoginFlow>();
+builder.Services.AddSingleton<SignInHandoff>();
 builder.Services.AddSingleton<LoginLimiter>();
 builder.WebHost.ConfigureKestrel(k => k.Limits.MaxRequestBodySize = options.MaxBlobBytes + 1024);
 
@@ -95,6 +96,17 @@ app.MapPost("/v1/token", async (HttpContext http, AccountDirectory accounts, Log
     return Results.Json(new { token, username = signedIn.User });
 });
 
+// The app opened from the "You're in" page trades the code in its button for a token (see SignInHandoff).
+app.MapPost("/v1/token/handoff", async (HttpContext http, AccountDirectory accounts, SignInHandoff handoff) =>
+{
+    HandoffRequest? body;
+    try { body = await http.Request.ReadFromJsonAsync<HandoffRequest>(); }
+    catch (Exception ex) when (ex is JsonException or InvalidOperationException) { body = null; }
+    if (handoff.Redeem(body?.Code) is not { } user || accounts.IssueToken(user, "Yaparr, opened from the sign-up page") is not { } token)
+        return Problem(StatusCodes.Status400BadRequest, "That sign-in has expired or was already used. Sign in from Yaparr's settings instead.");
+    return Results.Json(new { token, username = user });
+});
+
 // Signing a device out.
 app.MapDelete("/v1/token", (HttpContext http, AccountDirectory accounts) =>
     BearerOf(http) is { } token && accounts.RevokeToken(token) ? Results.NoContent() : Problem(StatusCodes.Status401Unauthorized, NotSignedIn));
@@ -154,7 +166,7 @@ app.MapPost("/signup", async (HttpContext http, AccountDirectory accounts, Signu
     return Html(http, Pages.SetPassword(token, email, null));
 }).DisableAntiforgery();
 
-app.MapPost("/account/setup", async (HttpContext http, AccountDirectory accounts, LoginLimiter limiter) =>
+app.MapPost("/account/setup", async (HttpContext http, AccountDirectory accounts, SignInHandoff handoff) =>
 {
     var form = await http.Request.ReadFormAsync();
     var token = form["token"].ToString();
@@ -170,7 +182,9 @@ app.MapPost("/account/setup", async (HttpContext http, AccountDirectory accounts
         return Html(http, Pages.Message("This page has run out", "Go back to your sign-up link and start again."), StatusCodes.Status400BadRequest);
 
     var server = options.PublicUrl.Length > 0 ? options.PublicUrl.TrimEnd('/') : $"{http.Request.Scheme}://{http.Request.Host}";
-    return Html(http, Pages.Welcome(done, server));
+    // A button that opens the app already signed in (see SignInHandoff). Not on a phone: the Android app has no backup server yet.
+    var phone = System.Text.RegularExpressions.Regex.IsMatch(http.Request.Headers.UserAgent.ToString(), "Android|iPhone|iPad|iPod|Mobile", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    return Html(http, Pages.Welcome(done, server, phone ? null : SignInHandoff.AppLink(handoff.Create(done), server)));
 }).DisableAntiforgery();
 
 // ---- the backup, for an app that is signed in (Authorization: Bearer <token>) ----
@@ -244,6 +258,8 @@ static IResult Html(HttpContext http, string page, int status = StatusCodes.Stat
 }
 
 internal sealed record TokenRequest(string? Code, string? Verifier);
+
+internal sealed record HandoffRequest(string? Code);
 
 /// <summary>For the tests, which start the service in memory.</summary>
 public partial class Program

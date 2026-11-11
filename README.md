@@ -52,6 +52,12 @@ What the friend does: opens the link, types their email address and presses Sign
 - An address that already has an account is told to sign in. An address that signed up but has not yet chosen a password can come back with the link and gets a fresh page (the old one stops working; it is not counted as another use). The page that chooses the password works once and for 30 minutes.
 - Anyone with the link can sign up with *any* email address, so send a code to people you trust, give a code a limit or an end date, and revoke it when you are done.
 
+### Carrying on in the app after signing up (`SignInHandoff`)
+
+When someone finishes choosing their password, the "You're in" page has a button, `yaparr://backup-signin/<code>/<this server, escaped>`, which opens the Yaparr app on that computer. The app asks the person to confirm ("Sign in to cloud.yaparr.com as …?"), trades the code for a token (`POST /v1/token/handoff`, body `{"code"}`, answer `{token, username}`) and is signed in, so they do not type the password again. The button is left out on a phone, since the Android app has no backup server yet.
+
+This is weaker than the browser sign-in below, and only for this moment. There the app starts the sign-in and keeps a secret (the PKCE verifier) that makes a stolen code useless; here the browser starts it, so the code alone is the proof, and another program on the same computer that also claims `yaparr://` links could take it. That is limited by: the code is 256 random bits, works once and for five minutes, is made only for the account whose password was just chosen, gives a token for that account's locked backups and nothing else, and the app shows the server and the account and asks before it trades the code.
+
 ### Signing in (`LoginFlow`)
 
 The way programs on a computer sign in to web services: OAuth's authorization code with PKCE, cut down to what is needed.
@@ -71,6 +77,7 @@ The pages are plain HTML with no scripts, are never cached or framed, and everyt
 | `POST /account/setup` | form: `token`, `password`, `again` | the welcome page; the token works once, for 30 minutes |
 | `GET /login`, `POST /login` | the sign-in page (see above) | `302` back to the app with `code` and `state` |
 | `POST /v1/token` | `{"code","verifier"}` | `{token, username}`; `400` if the code is spent, late or the verifier is wrong |
+| `POST /v1/token/handoff` | `{"code"}` from the button on the "You're in" page | `{token, username}`; `400` if the code is spent, late or never made |
 | `DELETE /v1/token` | `Authorization: Bearer <token>` | `204`; signs that device out |
 | `GET /account/password`, `POST` | the change-password page | signs every device out |
 | `PUT /v1/backup` | body: the locked backup; `If-Match: "n"` = the newest version the client knows (`"0"` for none) | `201 {version,size}`; `409` if a newer version exists; `428` without `If-Match`; `413` too big; `400` not a locked backup; `429` too many saves |

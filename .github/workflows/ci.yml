@@ -57,7 +57,8 @@ jobs:
         run: docker compose down -v
 
   # After a merge to master, and only if both of the above passed: deploys it on the droplet over SSH (deploy.sh, which goes back by itself if the
-  # new version is not healthy). The key can run that script and nothing else. A manual run of this workflow does not deploy.
+  # new version is not healthy). The key can run that script and nothing else. A manual run of this workflow does not deploy. Until the three secrets
+  # are set (docs/setup-guide.md, "Automatic deploys") it says so and does nothing, and the droplet is updated by hand with ./deploy.sh deploy.
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     needs: [test, docker]
@@ -66,7 +67,19 @@ jobs:
       group: deploy
       cancel-in-progress: false
     steps:
+      - name: Is automatic deployment set up?
+        id: setup
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          if [ -n "$DEPLOY_SSH_KEY" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Automatic deployment is not set up (there is no DEPLOY_SSH_KEY secret), so nothing was deployed. See docs/setup-guide.md, Automatic deploys."
+          fi
       - name: Deploy on the droplet
+        if: steps.setup.outputs.enabled == 'true'
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -78,4 +91,5 @@ jobs:
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
           ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 "deploy@$DEPLOY_HOST" deploy
       - name: It answers from outside
+        if: steps.setup.outputs.enabled == 'true'
         run: curl -fsS --retry 6 --retry-delay 5 --retry-connrefused https://cloud.yaparr.com/healthz

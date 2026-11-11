@@ -26,7 +26,7 @@ Do them in this order: the server, then the website, then the app. Each step say
    - **Authentication:** an SSH key, not a password.
    - Turn on **Backups** (weekly snapshots, a fifth more on the price). They are your safety net if the machine is lost.
 2. Note the droplet's IP address.
-3. Create a **Cloud Firewall** (Networking > Firewalls) and attach it to the droplet. Allow inbound **TCP 22** (from your own IP address if it is steady), **TCP 80**, **TCP 443** and **UDP 443**; nothing else. Use this rather than `ufw`: Docker publishes its ports around `ufw`, so `ufw` would not protect them.
+3. The firewall is done on the machine itself in step 4 (`ufw`), which costs nothing. DigitalOcean's **Cloud Firewall** (Networking > Firewalls) sits outside the machine and, as far as I know, is also free; if you want a second layer, allow inbound **TCP 22** (from your own IP address if it is steady), **TCP 80**, **TCP 443** and **UDP 443**, and attach it to the droplet. It is optional.
 
 ## 3. The DNS name
 
@@ -58,6 +58,21 @@ curl -fsSL https://get.docker.com | sh
 usermod -aG docker deploy
 reboot
 ```
+
+Then turn on the firewall (still as `root`, before the reboot, or `sudo` afterwards). SSH is rate-limited, and only the ports Caddy needs are open:
+
+```bash
+ufw default deny incoming
+ufw default allow outgoing
+ufw limit 22/tcp
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw allow 443/udp
+ufw --force enable
+ufw status verbose
+```
+
+Test that a **new** SSH login works before you close the one you are in. One thing to know about `ufw` and Docker: Docker publishes the ports of a container around `ufw`, so `ufw` cannot close a port that a container publishes. That is fine here: the only ports the compose file publishes to the world are Caddy's 80 and 443, and the service's own 8080 is bound to `127.0.0.1`. But if you ever publish another port, `ufw` will not block it; bind it to `127.0.0.1` or use the Cloud Firewall.
 
 Log in again as `deploy` (`ssh deploy@<droplet ip>`; copy your SSH key across first with `ssh-copy-id` if it asks for a password). `docker compose version` should work without `sudo`. Optional but wise: `sudo apt install unattended-upgrades` for automatic security updates.
 
@@ -157,4 +172,4 @@ Resetting a password loses nothing: backups are locked with each person's recove
 - The droplet is the only cost: roughly $12 a month, plus about 20% for backups.
 - Keep the system updated (`sudo apt update && sudo apt upgrade`, and the `git pull` update above).
 - Watch the disk (`df -h`): each person's backups keep the last five versions. `accounts list` shows who uses what.
-- The Cloud Firewall should allow SSH only from places you work from.
+- SSH takes keys only (the droplet's default), and `ufw limit` slows anyone who keeps trying. If your own address is steady, `ufw allow from <your address> to any port 22` and removing the general rule (`ufw delete limit 22/tcp`) is stricter, but you can lock yourself out if your address changes; the DigitalOcean web console is the way back in.

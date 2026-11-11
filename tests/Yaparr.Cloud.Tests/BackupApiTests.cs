@@ -1,79 +1,83 @@
-using System.Buffers.Text;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Yaparr.Cloud;
 
 namespace Yaparr.Cloud.Tests;
 
-public sealed class BackupApiTests : IDisposable
+/// <summary>Starts the service in memory on a data folder of its own.</summary>
+public abstract class ServiceTest : IDisposable
 {
-    private readonly string _dir = Path.Combine(Path.GetTempPath(), "yaparr-service-" + Guid.NewGuid().ToString("N"));
+    protected readonly string Dir = Path.Combine(Path.GetTempPath(), "yaparr-cloud-" + Guid.NewGuid().ToString("N"));
     private readonly List<WebApplicationFactory<Program>> _factories = new();
-    private const string Password = "correct horse battery";
+    protected const string Password = "correct horse battery";
 
-    private HttpClient Start(Dictionary<string, string>? settings = null)
+    protected ServiceOptions Options => new() { DataDirectory = Dir };
+
+    protected HttpClient Start(Dictionary<string, string>? settings = null)
     {
         var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
         {
-            b.UseSetting("Service:DataDirectory", _dir);
+            b.UseSetting("Service:DataDirectory", Dir);
             foreach (var (key, value) in settings ?? new()) b.UseSetting("Service:" + key, value);
         });
         _factories.Add(factory);
-        return factory.CreateClient();
+        // A browser is sent from page to page; the tests look at each step, so they do not follow.
+        return factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
     }
 
     public void Dispose()
     {
         foreach (var f in _factories) f.Dispose();
-        try { Directory.Delete(_dir, true); } catch (IOException) { }
+        try { Directory.Delete(Dir, true); } catch (IOException) { }
     }
 
-    /// <summary>A person with an account: the username and the key their password leads to (made with small settings, which are quicker).</summary>
-    private sealed record Person(string Name, byte[] Seed);
-
-    private Person Register(string name, string password = Password)
+    /// <summary>An account, and a device that is signed in as it (its token).</summary>
+    protected string Register(string name, string password = Password)
     {
-        var seed = LoginKeys.SigningSeed(name, password, 8 * 1024, 1);
-        Assert.True(new AccountDirectory(new ServiceOptions { DataDirectory = _dir }).Add(name, LoginKeys.PublicKeyOf(seed)));
-        return new Person(name, seed);
+        var accounts = new AccountDirectory(Options);
+        Assert.True(accounts.Add(name, password));
+        return accounts.IssueToken(name, "A test")!;
     }
 
     // What the service accepts as a backup: it starts as a locked one does.
-    private static byte[] Locked(int length = 1000)
+    protected static byte[] Locked(int length = 1000)
     {
         var body = RandomNumberGenerator.GetBytes(length);
         BackupStore.Magic.CopyTo(body, 0);
         return body;
     }
 
-    private static async Task<HttpResponseMessage> Send(HttpClient client, Person who, HttpMethod method, string path, byte[]? body = null, int? ifMatch = null,
-        DateTimeOffset? at = null, string? signedPath = null)
+    protected static async Task<HttpResponseMessage> Send(HttpClient client, string? token, HttpMethod method, string path, byte[]? body = null, int? ifMatch = null)
     {
-        var hash = body == null ? null : Convert.ToHexStringLower(SHA256.HashData(body));
         var request = new HttpRequestMessage(method, path);
-        foreach (var (name, value) in RequestSigner.Sign(who.Seed, who.Name, method.Method, signedPath ?? path, at ?? DateTimeOffset.UtcNow, hash))
-            request.Headers.Add(name, value);
+        if (token != null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         if (ifMatch != null) request.Headers.Add("If-Match", "\"" + ifMatch.Value + "\"");
         if (body != null) request.Content = new ByteArrayContent(body);
         return await client.SendAsync(request);
     }
 
-    private static async Task<int> VersionOf(HttpResponseMessage response) =>
-        (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt32();
+    protected static async Task<JsonElement[]> Versions(HttpClient client, string token) =>
+        (await (await Send(client, token, HttpMethod.Get, "/v1/backup/versions")).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("versions").EnumerateArray().ToArray();
 
     // The files of backups, not the list of accounts that sits beside them.
-    private IEnumerable<string> BackupFiles() =>
-        Directory.Exists(_dir) ? Directory.EnumerateDirectories(_dir).SelectMany(d => Directory.EnumerateFiles(d)) : Enumerable.Empty<string>();
+    protected IEnumerable<string> BackupFiles() =>
+        Directory.Exists(Dir) ? Directory.EnumerateDirectories(Dir).SelectMany(d => Directory.EnumerateFiles(d)) : Enumerable.Empty<string>();
+}
+
+public sealed class BackupApiTests : ServiceTest
+{
+    private static async Task<int> VersionOf(HttpResponseMessage response) =>
+        (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt32();
 
     [Fact]
     public async Task A_backup_saved_comes_back_the_same()
     {
         var client = Start();
-        var sam = Register("sam");
+        var sam = Register("sam@example.com");
         var body = Locked(200_000);
 
         var put = await Send(client, sam, HttpMethod.Put, "/v1/backup", body, ifMatch: 0);
@@ -86,139 +90,100 @@ public sealed class BackupApiTests : IDisposable
         Assert.Equal(body, await get.Content.ReadAsByteArrayAsync());
     }
 
-    [Fact]
-    public async Task Nothing_is_answered_without_a_good_signature()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("ycl_not-a-token-anyone-was-given")]
+    [InlineData("something else entirely")]
+    public async Task Nothing_is_answered_without_a_token(string? token)
     {
         var client = Start();
-        var sam = Register("sam");
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/v1/backup")).StatusCode);
-
-        // Signed for another path, or a time long ago or far ahead: all refused.
-        Assert.Equal(HttpStatusCode.Unauthorized, (await Send(client, sam, HttpMethod.Get, "/v1/backup", signedPath: "/v1/backup/versions")).StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, (await Send(client, sam, HttpMethod.Get, "/v1/backup", at: DateTimeOffset.UtcNow.AddHours(-1))).StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, (await Send(client, sam, HttpMethod.Get, "/v1/backup", at: DateTimeOffset.UtcNow.AddHours(1))).StatusCode);
-
-        // A signature for DELETE does not read.
-        var request = new HttpRequestMessage(HttpMethod.Get, "/v1/backup");
-        foreach (var (name, value) in RequestSigner.Sign(sam.Seed, "sam", "DELETE", "/v1/backup", DateTimeOffset.UtcNow)) request.Headers.Add(name, value);
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(request)).StatusCode);
-    }
-
-    [Fact]
-    public async Task A_wrong_password_and_an_unknown_name_are_refused_in_the_same_words()
-    {
-        var client = Start();
-        Register("sam");
-        var wrongPassword = new Person("sam", LoginKeys.SigningSeed("sam", "not the right one!", 8 * 1024, 1));
-        var stranger = new Person("alex", LoginKeys.SigningSeed("alex", Password, 8 * 1024, 1));
-
-        var a = await Send(client, wrongPassword, HttpMethod.Get, "/v1/backup");
-        var b = await Send(client, stranger, HttpMethod.Get, "/v1/backup");
-        Assert.Equal(HttpStatusCode.Unauthorized, a.StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, b.StatusCode);
-        Assert.Equal(await a.Content.ReadAsStringAsync(), await b.Content.ReadAsStringAsync());   // nothing says who has an account
-    }
-
-    [Fact]
-    public async Task Nobody_can_make_an_account_by_asking_and_a_removed_one_is_refused()
-    {
-        var client = Start();
-        var stranger = new Person("alex", LoginKeys.SigningSeed("alex", Password, 8 * 1024, 1));
-        Assert.Equal(HttpStatusCode.Unauthorized, (await Send(client, stranger, HttpMethod.Put, "/v1/backup", Locked(), ifMatch: 0)).StatusCode);
+        Register("sam@example.com");
+        foreach (var (method, path) in new[] { (HttpMethod.Get, "/v1/backup"), (HttpMethod.Get, "/v1/backup/versions"), (HttpMethod.Delete, "/v1/backup"), (HttpMethod.Delete, "/v1/token") })
+            Assert.Equal(HttpStatusCode.Unauthorized, (await Send(client, token, method, path)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Send(client, token, HttpMethod.Put, "/v1/backup", Locked(), ifMatch: 0)).StatusCode);
         Assert.Empty(BackupFiles());
-
-        var sam = Register("sam");
-        Assert.Equal(HttpStatusCode.Created, (await Send(client, sam, HttpMethod.Put, "/v1/backup", Locked(), ifMatch: 0)).StatusCode);
-        new AccountDirectory(new ServiceOptions { DataDirectory = _dir }).Remove("sam");           // by the admin, while the service runs
-        Assert.Equal(HttpStatusCode.Unauthorized, (await Send(client, sam, HttpMethod.Get, "/v1/backup")).StatusCode);
     }
 
     [Fact]
     public async Task One_account_cannot_see_or_remove_another_accounts_backup()
     {
         var client = Start();
-        var sam = Register("sam");
-        var alex = Register("alex");
+        var sam = Register("sam@example.com");
+        var alex = Register("alex@example.com");
         await Send(client, sam, HttpMethod.Put, "/v1/backup", Locked(), ifMatch: 0);
 
         Assert.Equal(HttpStatusCode.NotFound, (await Send(client, alex, HttpMethod.Get, "/v1/backup")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await Send(client, alex, HttpMethod.Delete, "/v1/backup")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await Send(client, sam, HttpMethod.Get, "/v1/backup")).StatusCode);
+    }
 
-        // Signing as sam with alex's key does not work either.
-        Assert.Equal(HttpStatusCode.Unauthorized, (await Send(client, new Person("sam", alex.Seed), HttpMethod.Get, "/v1/backup")).StatusCode);
+    [Fact]
+    public async Task A_removed_account_and_a_signed_out_device_are_refused()
+    {
+        var client = Start();
+        var sam = Register("sam@example.com");
+        var second = new AccountDirectory(Options).IssueToken("sam@example.com", "Another device")!;
+        Assert.Equal(HttpStatusCode.Created, (await Send(client, sam, HttpMethod.Put, "/v1/backup", Locked(), ifMatch: 0)).StatusCode);
+
+        // One device signs out: it is refused, the other carries on.
+        Assert.Equal(HttpStatusCode.NoContent, (await Send(client, second, HttpMethod.Delete, "/v1/token")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Send(client, second, HttpMethod.Get, "/v1/backup")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await Send(client, sam, HttpMethod.Get, "/v1/backup")).StatusCode);
+
+        new AccountDirectory(Options).Remove("sam@example.com");           // by the admin, while the service runs
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Send(client, sam, HttpMethod.Get, "/v1/backup")).StatusCode);
     }
 
     [Fact]
     public async Task A_plain_backup_is_never_stored()
     {
         var client = Start();
-        var sam = Register("sam");
+        var sam = Register("sam@example.com");
         var zip = new byte[] { 0x50, 0x4B, 3, 4, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
         Assert.Equal(HttpStatusCode.BadRequest, (await Send(client, sam, HttpMethod.Put, "/v1/backup", zip, ifMatch: 0)).StatusCode);
         Assert.Empty(BackupFiles());
         Assert.Equal(HttpStatusCode.BadRequest, (await Send(client, sam, HttpMethod.Put, "/v1/backup", new byte[] { 1, 2 }, ifMatch: 0)).StatusCode);
-    }
-
-    [Fact]
-    public async Task What_arrives_must_be_what_was_signed()
-    {
-        var client = Start();
-        var sam = Register("sam");
-        var signed = Locked();
-        var other = Locked();
-
-        var request = new HttpRequestMessage(HttpMethod.Put, "/v1/backup");
-        foreach (var (name, value) in RequestSigner.Sign(sam.Seed, "sam", "PUT", "/v1/backup", DateTimeOffset.UtcNow, Convert.ToHexStringLower(SHA256.HashData(signed))))
-            request.Headers.Add(name, value);
-        request.Headers.Add("If-Match", "\"0\"");
-        request.Content = new ByteArrayContent(other);
-        Assert.Equal(HttpStatusCode.BadRequest, (await client.SendAsync(request)).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await Send(client, sam, HttpMethod.Get, "/v1/backup")).StatusCode);   // nothing was kept
-        Assert.Empty(BackupFiles());                                                                                   // not even the half-written file
+        Assert.Empty(BackupFiles());
     }
 
     [Fact]
     public async Task A_save_must_say_what_it_is_based_on_and_two_devices_cannot_overwrite_each_other()
     {
         var client = Start();
-        var sam = Register("sam");
+        var sam = Register("sam@example.com");
 
         Assert.Equal((HttpStatusCode)428, (await Send(client, sam, HttpMethod.Put, "/v1/backup", Locked())).StatusCode);
         Assert.Equal(HttpStatusCode.Created, (await Send(client, sam, HttpMethod.Put, "/v1/backup", Locked(), ifMatch: 0)).StatusCode);
-        // The second device had not seen version 1.
+        // The second device had not seen version 1. A request that is sent twice ends the same way.
         var stale = await Send(client, sam, HttpMethod.Put, "/v1/backup", Locked(), ifMatch: 0);
         Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
         Assert.Equal(1, await VersionOf(stale));
 
         Assert.Equal(HttpStatusCode.Created, (await Send(client, sam, HttpMethod.Put, "/v1/backup", Locked(), ifMatch: 1)).StatusCode);
-        Assert.Equal(2, (await (await Send(client, sam, HttpMethod.Get, "/v1/backup/versions")).Content.ReadFromJsonAsync<JsonElement[]>())!.Length);
+        Assert.Equal(2, (await Versions(client, sam)).Length);
     }
 
     [Fact]
-    public async Task A_request_sent_again_is_not_saved_twice()
+    public async Task The_list_of_versions_says_whose_it_is()
     {
         var client = Start();
-        var sam = Register("sam");
-        var body = Locked();
-        var at = DateTimeOffset.UtcNow;
-        Assert.Equal(HttpStatusCode.Created, (await Send(client, sam, HttpMethod.Put, "/v1/backup", body, ifMatch: 0, at: at)).StatusCode);
-        Assert.Equal(HttpStatusCode.Conflict, (await Send(client, sam, HttpMethod.Put, "/v1/backup", body, ifMatch: 0, at: at)).StatusCode);   // the same bytes, replayed
-        Assert.Single((await (await Send(client, sam, HttpMethod.Get, "/v1/backup/versions")).Content.ReadFromJsonAsync<JsonElement[]>())!);
+        var sam = Register("sam@example.com");
+        var answer = await (await Send(client, sam, HttpMethod.Get, "/v1/backup/versions")).Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("sam@example.com", answer.GetProperty("username").GetString());
+        Assert.Equal(0, answer.GetProperty("versions").GetArrayLength());
     }
 
     [Fact]
     public async Task Only_the_newest_versions_are_kept_and_an_old_one_can_be_fetched()
     {
         var client = Start(new() { ["KeepVersions"] = "3", ["WritesPerHour"] = "100" });
-        var sam = Register("sam");
+        var sam = Register("sam@example.com");
         var bodies = Enumerable.Range(0, 5).Select(_ => Locked()).ToArray();
         for (int i = 0; i < bodies.Length; i++)
             Assert.Equal(HttpStatusCode.Created, (await Send(client, sam, HttpMethod.Put, "/v1/backup", bodies[i], ifMatch: i)).StatusCode);
 
-        var versions = (await (await Send(client, sam, HttpMethod.Get, "/v1/backup/versions")).Content.ReadFromJsonAsync<JsonElement[]>())!;
-        Assert.Equal(new[] { 5, 4, 3 }, versions.Select(v => v.GetProperty("version").GetInt32()).ToArray());
-
+        Assert.Equal(new[] { 5, 4, 3 }, (await Versions(client, sam)).Select(v => v.GetProperty("version").GetInt32()).ToArray());
         var old = await Send(client, sam, HttpMethod.Get, "/v1/backup?version=3");
         Assert.Equal(bodies[2], await old.Content.ReadAsByteArrayAsync());
         Assert.Equal(HttpStatusCode.NotFound, (await Send(client, sam, HttpMethod.Get, "/v1/backup?version=1")).StatusCode);
@@ -228,7 +193,7 @@ public sealed class BackupApiTests : IDisposable
     public async Task A_backup_over_the_size_limit_is_refused_and_leaves_nothing()
     {
         var client = Start(new() { ["MaxBlobBytes"] = "5000" });
-        var sam = Register("sam");
+        var sam = Register("sam@example.com");
         Assert.Equal(HttpStatusCode.Created, (await Send(client, sam, HttpMethod.Put, "/v1/backup", Locked(4000), ifMatch: 0)).StatusCode);
         Assert.Equal((HttpStatusCode)413, (await Send(client, sam, HttpMethod.Put, "/v1/backup", Locked(6000), ifMatch: 1)).StatusCode);
         Assert.DoesNotContain(BackupFiles(), f => f.EndsWith(".tmp"));
@@ -238,8 +203,8 @@ public sealed class BackupApiTests : IDisposable
     public async Task Saving_is_limited_per_hour_for_an_account_and_not_for_another()
     {
         var client = Start(new() { ["WritesPerHour"] = "2" });
-        var sam = Register("sam");
-        var alex = Register("alex");
+        var sam = Register("sam@example.com");
+        var alex = Register("alex@example.com");
         Assert.Equal(HttpStatusCode.Created, (await Send(client, sam, HttpMethod.Put, "/v1/backup", Locked(), ifMatch: 0)).StatusCode);
         Assert.Equal(HttpStatusCode.Created, (await Send(client, sam, HttpMethod.Put, "/v1/backup", Locked(), ifMatch: 1)).StatusCode);
         Assert.Equal(HttpStatusCode.TooManyRequests, (await Send(client, sam, HttpMethod.Put, "/v1/backup", Locked(), ifMatch: 2)).StatusCode);
@@ -260,7 +225,7 @@ public sealed class BackupApiTests : IDisposable
     public async Task Deleting_removes_every_version()
     {
         var client = Start();
-        var sam = Register("sam");
+        var sam = Register("sam@example.com");
         await Send(client, sam, HttpMethod.Put, "/v1/backup", Locked(), ifMatch: 0);
         await Send(client, sam, HttpMethod.Put, "/v1/backup", Locked(), ifMatch: 1);
 
@@ -270,52 +235,15 @@ public sealed class BackupApiTests : IDisposable
         Assert.Empty(BackupFiles());
     }
 
-    private static async Task<HttpResponseMessage> ChangeKey(HttpClient client, Person who, byte[] newPublicKey)
-    {
-        var body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { publicKey = Base64Url.EncodeToString(newPublicKey) }));
-        var request = new HttpRequestMessage(HttpMethod.Put, "/v1/account/key") { Content = new ByteArrayContent(body) };
-        foreach (var (name, value) in RequestSigner.Sign(who.Seed, who.Name, "PUT", "/v1/account/key", DateTimeOffset.UtcNow, Convert.ToHexStringLower(SHA256.HashData(body))))
-            request.Headers.Add(name, value);
-        return await client.SendAsync(request);
-    }
-
-    [Fact]
-    public async Task A_changed_password_replaces_the_key_and_keeps_the_backup()
-    {
-        var client = Start();
-        var sam = Register("sam");
-        var body = Locked();
-        await Send(client, sam, HttpMethod.Put, "/v1/backup", body, ifMatch: 0);
-
-        var newSeed = LoginKeys.SigningSeed("sam", "a brand new password", 8 * 1024, 1);
-        Assert.Equal(HttpStatusCode.NoContent, (await ChangeKey(client, sam, LoginKeys.PublicKeyOf(newSeed))).StatusCode);
-
-        Assert.Equal(HttpStatusCode.Unauthorized, (await Send(client, sam, HttpMethod.Get, "/v1/backup")).StatusCode);   // the old password is done
-        var now = await Send(client, new Person("sam", newSeed), HttpMethod.Get, "/v1/backup");
-        Assert.Equal(body, await now.Content.ReadAsByteArrayAsync());                                                     // the new one reaches the same backup
-    }
-
-    [Fact]
-    public async Task A_key_change_needs_a_real_key_and_cannot_be_made_by_someone_else()
-    {
-        var client = Start();
-        var sam = Register("sam");
-        var alex = Register("alex");
-        Assert.Equal(HttpStatusCode.BadRequest, (await ChangeKey(client, sam, new byte[5])).StatusCode);
-
-        // Alex signing a change for sam's account is refused: it is checked against sam's key.
-        var attacker = new Person("sam", alex.Seed);
-        Assert.Equal(HttpStatusCode.Unauthorized, (await ChangeKey(client, attacker, LoginKeys.PublicKeyOf(alex.Seed))).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await Send(client, sam, HttpMethod.Get, "/v1/backup")).StatusCode);   // sam's key still works
-    }
-
     [Fact]
     public void The_store_refuses_an_account_that_is_not_a_hash_so_nothing_can_name_a_path()
     {
-        var store = new BackupStore(new ServiceOptions { DataDirectory = _dir });
+        var store = new BackupStore(Options);
         Assert.Throws<ArgumentException>(() => store.Versions("../../etc"));
         Assert.Throws<ArgumentException>(() => store.Versions(new string('A', 64)));   // upper case is not what FolderOf makes
         Assert.Empty(store.Versions(new string('a', 64)));
+        Assert.Matches("^[0-9a-f]{64}$", BackupStore.FolderOf("sam@example.com"));
+        Assert.NotEqual(BackupStore.FolderOf("sam@example.com"), BackupStore.FolderOf("alex@example.com"));
     }
 
     [Fact]

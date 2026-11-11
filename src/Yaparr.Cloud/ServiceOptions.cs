@@ -21,6 +21,4 @@ public sealed class ServiceOptions
     /// <summary>True when a reverse proxy sits in front (which is how it gets https), so the caller's address is read from <c>X-Forwarded-For</c>. Leave it off when the service is reachable directly, or anyone could claim any address.</summary>
     public bool BehindProxy { get; set; }
 
-    /// <summary>How far a request's clock may be from the server's, in seconds.</summary>
-    public int ClockSkewSeconds { get; set; } = 300;
 }

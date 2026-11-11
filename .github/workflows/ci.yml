@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to a pull request makes the older run pointless; on master a run is never cut short (a deploy may be in it).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet test --configuration Release
+
+  # What the tests cannot see: that the compose file and the Caddyfile are valid, that the image builds, and that the service in it comes up healthy
+  # (a health check that could never pass was once found only by running the image on the droplet).
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The compose file and the Caddyfile are valid
+        run: |
+          docker compose config -q
+          docker run --rm -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" -e DOMAIN=cloud.yaparr.com caddy:2 caddy validate --config /etc/caddy/Caddyfile
+      - name: The image builds and the service comes up healthy
+        run: |
+          docker compose up -d --build cloud
+          for i in $(seq 1 40); do
+            state=$(docker inspect --format '{{.State.Health.Status}}' "$(docker compose ps -q cloud)")
+            [ "$state" = healthy ] && break
+            sleep 3
+          done
+          echo "health: $state"
+          [ "$state" = healthy ]
+          curl -fsS http://127.0.0.1:8080/healthz
+      - name: The admin commands work in the image, on its data volume
+        run: |
+          docker compose exec -T cloud dotnet Yaparr.Cloud.dll accounts add ci@example.com --password "a password for the test run" | head -1
+          docker compose exec -T cloud dotnet Yaparr.Cloud.dll codes add --uses 1 | head -1
+          docker compose exec -T cloud dotnet Yaparr.Cloud.dll accounts list
+      - name: What the service said
+        if: always()
+        run: docker compose logs cloud | tail -30
+      - if: always()
+        run: docker compose down -v
+
+  # After a merge to master, and only if both of the above passed: deploys it on the droplet over SSH (deploy.sh, which goes back by itself if the
+  # new version is not healthy). The key can run that script and nothing else. A manual run of this workflow does not deploy. Until the three secrets
+  # are set (docs/setup-guide.md, "Automatic deploys") it says so and does nothing, and the droplet is updated by hand with ./deploy.sh deploy.
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: [test, docker]
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy
+      cancel-in-progress: false
+    steps:
+      - name: Is automatic deployment set up?
+        id: setup
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          if [ -n "$DEPLOY_SSH_KEY" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Automatic deployment is not set up (there is no DEPLOY_SSH_KEY secret), so nothing was deployed. See docs/setup-guide.md, Automatic deploys."
+          fi
+      - name: Deploy on the droplet
+        if: steps.setup.outputs.enabled == 'true'
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 "deploy@$DEPLOY_HOST" deploy
+      - name: It answers from outside
+        if: steps.setup.outputs.enabled == 'true'
+        run: curl -fsS --retry 6 --retry-delay 5 --retry-connrefused https://cloud.yaparr.com/healthz

@@ -144,7 +144,8 @@ Merge the app's pull request. The app is released with `yaparr.release.json` bes
 
 | To | Run (in the `Yaparr.Cloud` folder) |
 | --- | --- |
-| Update the server | `git pull && docker compose up -d --build` |
+| Update the server | `./deploy.sh deploy` (gets `master`, rebuilds, waits for the service to be healthy and goes back by itself if it is not). With automatic deploys (section 10a) a merge to `master` does this for you. |
+| See what is running | `./deploy.sh check` |
 | See what it is doing | `docker compose logs -f cloud` |
 | Add a friend by hand | `docker compose exec cloud dotnet Yaparr.Cloud.dll accounts add them@example.com` |
 | Reset a password | `docker compose exec cloud dotnet Yaparr.Cloud.dll accounts password them@example.com` |
@@ -152,6 +153,37 @@ Merge the app's pull request. The app is released with `yaparr.release.json` bes
 | Who has accounts, and the space used | `docker compose exec cloud dotnet Yaparr.Cloud.dll accounts list` |
 | Make, list or stop signup codes | `docker compose exec cloud dotnet Yaparr.Cloud.dll codes add` / `codes list` / `codes revoke <id>` |
 | Copy all the data off the machine | `docker compose cp cloud:/data ./cloud-data-$(date +%F)` |
+
+## 10a. Automatic deploys (optional)
+
+The `CI` workflow (`.github/workflows/ci.yml`) runs on every pull request and every push: the tests, a check that the compose file and the Caddyfile are valid, and a build of the image that starts the service in it and checks it comes up healthy and that the admin commands work. That needs nothing from you.
+
+After a merge to `master` it can also **deploy** to the droplet, if you give it a way in. The way in is a key that can run `deploy.sh` and nothing else (a *forced command*: whatever the key asks for, the droplet runs the script, which accepts only `deploy` and `check`). Until you set it up, the deploy step says so and does nothing, and you deploy by hand with `./deploy.sh deploy`.
+
+To turn it on, run these on your own computer (PowerShell), then on the droplet:
+
+```powershell
+# 1. Make a key for GitHub to use, with no passphrase (it is used by a script)
+ssh-keygen -t ed25519 -N '""' -C "github-actions deploy (Yaparr.Cloud)" -f ci_deploy_key
+
+# 2. Tell GitHub the key, where to go, and which machine it should trust
+Get-Content -Raw ci_deploy_key | gh secret set DEPLOY_SSH_KEY --repo zburtle/Yaparr.Cloud
+gh secret set DEPLOY_HOST --repo zburtle/Yaparr.Cloud --body "cloud.yaparr.com"
+ssh-keyscan -t ed25519 cloud.yaparr.com | gh secret set DEPLOY_KNOWN_HOSTS --repo zburtle/Yaparr.Cloud
+
+# 3. Show the public half, to put on the droplet
+Get-Content ci_deploy_key.pub
+```
+
+On the droplet, as `deploy`, add one line to `~/.ssh/authorized_keys`, made of the restrictions and the public key from step 3:
+
+```
+command="/home/deploy/Yaparr.Cloud/deploy.sh",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA... github-actions deploy (Yaparr.Cloud)
+```
+
+Then delete `ci_deploy_key` and `ci_deploy_key.pub` from your computer (GitHub has its own copy as a secret). To check it, run `ssh -i ci_deploy_key deploy@cloud.yaparr.com check` before you delete it: it prints the branch and commit that are running and whether the service is healthy. To turn automatic deploys off, delete that line from `authorized_keys` (and the `DEPLOY_SSH_KEY` secret).
+
+What this gives and what it costs: anyone who could run GitHub Actions in this repository (you) can deploy whatever is on `master` to the droplet, and nothing else; the key cannot open a shell. Since `deploy.sh` is part of the repository, whatever is merged into `master` runs there, so protect `master` the way you protect any branch that deploys.
 
 Resetting a password loses nothing: backups are locked with each person's recovery code, which the server never has, so you cannot open anyone's backup and a lost code cannot be recovered. Everything the server keeps is in the `cloud-data` volume (accounts with password hashes, signup codes as hashes, and the locked backups); the droplet backups cover it, and the `docker compose cp` line above makes a copy you can keep elsewhere.
 

@@ -123,6 +123,12 @@ Point a DNS name at the machine and open ports 80 and 443 first. Everything (the
 - **Settings** are the `Service__...` environment variables in the compose file. Keep `Service__BehindProxy=true` while a proxy is in front.
 - **Komodo:** a Stack with a Git Repo source, this repository and `docker-compose.yml` works as it is.
 
+## Tests and deploying
+
+`.github/workflows/ci.yml` runs on every pull request and push: the tests, a check that the compose file and the Caddyfile are valid, and a build of the image that starts the service in it and checks it is healthy. After a merge to `master` it can deploy to the droplet over SSH, once the three secrets in [docs/setup-guide.md](docs/setup-guide.md#10a-automatic-deploys-optional) are set; until then it says so and does nothing.
+
+By hand, on the droplet: `./deploy.sh deploy` gets `master`, rebuilds, waits for the service to be healthy and goes back to what was running if it does not become healthy. `./deploy.sh check` says what is running.
+
 ## Building
 
 ```

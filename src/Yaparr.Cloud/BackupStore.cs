@@ -22,9 +22,13 @@ public sealed class BackupStore
     private readonly string _root;
     private readonly ServiceOptions _options;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new();
+    private readonly Func<DateTimeOffset> _now;
 
-    public BackupStore(ServiceOptions options)
+    public BackupStore(ServiceOptions options) : this(options, () => DateTimeOffset.UtcNow) { }
+
+    internal BackupStore(ServiceOptions options, Func<DateTimeOffset> now)
     {
+        _now = now;
         _options = options;
         _root = Path.GetFullPath(options.DataDirectory);
         Directory.CreateDirectory(_root);
@@ -112,8 +116,10 @@ public sealed class BackupStore
 
                 var version = basedOn + 1;
                 File.Move(temp, Path.Combine(folder, FileName(version)));
-                foreach (var old in existing.Where(v => v.Version <= version - Math.Max(1, _options.KeepVersions)))
-                    try { File.Delete(Path.Combine(folder, FileName(old.Version))); } catch (IOException) { }
+                // The new one counts as of now; the older ones by when their files were written. What is kept is Retention's rule.
+                var all = existing.Append(new BackupVersion(version, size, _now())).ToList();
+                foreach (var old in Retention.ToDelete(all, _now(), _options.KeepVersions, _options.KeepDays))
+                    try { File.Delete(Path.Combine(folder, FileName(old))); } catch (IOException) { }
                 return new SaveResult(SaveOutcome.Saved, version, size);
             }
             finally { try { File.Delete(temp); } catch (IOException) { } }

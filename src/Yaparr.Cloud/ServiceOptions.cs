@@ -9,8 +9,14 @@ public sealed class ServiceOptions
     /// <summary>The largest backup accepted, in bytes (512 MiB).</summary>
     public long MaxBlobBytes { get; set; } = 512L * 1024 * 1024;
 
-    /// <summary>How many versions of a backup are kept; an older one is removed when a newer one is saved.</summary>
-    public int KeepVersions { get; set; } = 5;
+    /// <summary>How many of the newest versions of a backup are always kept (3).</summary>
+    public int KeepVersions { get; set; } = 3;
+
+    /// <summary>
+    /// And the newest version of each of this many days, counting today (7): one a day for a week, so saving often does not push the older copies out. 0 keeps
+    /// only the newest <see cref="KeepVersions"/>. See <see cref="Retention"/>.
+    /// </summary>
+    public int KeepDays { get; set; } = 7;
 
     /// <summary>Requests per minute from one account (or one address, for a request that is not signed).</summary>
     public int RequestsPerMinute { get; set; } = 120;

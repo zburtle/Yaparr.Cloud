@@ -90,13 +90,15 @@ Everything under `/v1/backup` needs `Authorization: Bearer <token>`; without a t
 
 ### Limits (`appsettings.json`, section `Service`, or `Service__Name` environment variables)
 
-`MaxBlobBytes` (512 MiB), `KeepVersions` (5), `RequestsPerMinute` per address (120), `WritesPerHour` per account (12), `DataDirectory` (`data`), `PublicUrl` (`https://cloud.yaparr.com`), `SignupPageUrl` (`https://yaparr.com/signup`), `BehindProxy`.
+`MaxBlobBytes` (512 MiB), `KeepVersions` (3) and `KeepDays` (7), `RequestsPerMinute` per address (120), `WritesPerHour` per account (12), `DataDirectory` (`data`), `PublicUrl` (`https://cloud.yaparr.com`), `SignupPageUrl` (`https://yaparr.com/signup`), `BehindProxy`.
 
 Set `BehindProxy` to `true` only when a reverse proxy is in front (it should be, for https): then the caller's address comes from `X-Forwarded-For`. Left on without a proxy, anyone can claim any address.
 
 ### Storage
 
 Files, one folder per account (the hex SHA-256 of its email address) with numbered versions, written to a temporary file and moved into place. `BackupStore` is the only thing that touches them, so S3 or similar can replace it later. `accounts.json` beside them holds the email addresses, password hashes, token hashes and passes, and `codes.json` the signup codes (as hashes) and who used them.
+
+**Which versions are kept.** A backup is saved when something that cannot be lost changes (a room, a key, a linked device) and once a day for the history, so saving often must not push the older, known-good copies out: a bad save would then replace every good one. After each save the server keeps the newest `KeepVersions` (3), and the newest version of each of the last `KeepDays` (7) UTC days, counting today, and removes the rest (`Retention`). So an account holds at most ten versions: the latest few, and one from each morning of the week. The newest is never removed. (Before this, the newest five were kept whatever their age.)
 
 ### Not done yet
 

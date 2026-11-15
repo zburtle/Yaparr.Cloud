@@ -76,9 +76,9 @@ public static class AdminPortal
 
         // ---- the overview ----
 
-        admin.MapGet("", (HttpContext http, IAccounts accounts, AdminSessions sessions, BackupStore store, ISignupCodes codes) =>
+        admin.MapGet("", async (HttpContext http, IAccounts accounts, AdminSessions sessions, IBackupStore store, ISignupCodes codes) =>
             Current(http, accounts, sessions) is { } session
-                ? Html(http, Dashboard(session, options, accounts, store, codes))
+                ? Html(http, await DashboardAsync(session, options, accounts, store, codes))
                 : Results.Redirect("/admin/login"));
 
         // ---- accounts ----
@@ -111,7 +111,7 @@ public static class AdminPortal
                 ? Html(http, AdminPages.ConfirmRemove(session, who, accounts.IsAdmin(who)))
                 : Html(http, AdminPages.Result("There is no such account", "It may have been removed."), StatusCodes.Status404NotFound));
 
-        admin.MapPost("/accounts/remove", (HttpContext http, IAccounts accounts, AdminSessions sessions, BackupStore store) => Post(http, accounts, sessions, async (session, form) =>
+        admin.MapPost("/accounts/remove", (HttpContext http, IAccounts accounts, AdminSessions sessions, IBackupStore store) => Post(http, accounts, sessions, async (session, form) =>
         {
             if (AccountDirectory.Normalize(form["name"].ToString()) is not { } name || !accounts.Exists(name))
                 return Html(http, AdminPages.Result("There is no such account", "It may have been removed."), StatusCodes.Status404NotFound);
@@ -202,13 +202,14 @@ public static class AdminPortal
         return await action(session, form);
     }
 
-    private static string Dashboard(AdminSession session, ServiceOptions options, IAccounts accounts, BackupStore store, ISignupCodes codes)
+    private static async Task<string> DashboardAsync(AdminSession session, ServiceOptions options, IAccounts accounts, IBackupStore store, ISignupCodes codes)
     {
-        var rows = accounts.List().Select(a =>
+        var rows = new List<AdminPages.AccountRow>();
+        foreach (var a in accounts.List())
         {
-            var versions = store.Versions(BackupStore.FolderOf(a.Name));
-            return new AdminPages.AccountRow(a, versions.Count, versions.Sum(v => v.Size), versions.Count == 0 ? null : versions[0].At);
-        }).ToList();
+            var versions = await store.VersionsAsync(BackupStore.FolderOf(a.Name));
+            rows.Add(new AdminPages.AccountRow(a, versions.Count, versions.Sum(v => v.Size), versions.Count == 0 ? null : versions[0].At));
+        }
 
         long? free = null, total = null;
         try

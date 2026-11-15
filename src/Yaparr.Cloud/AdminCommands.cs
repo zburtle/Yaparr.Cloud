@@ -22,6 +22,29 @@ public static class AdminCommands
         "  codes revoke <id>               stop a code working (people who signed up with it keep their accounts)\n" +
         "  codes delete <id>               take a code out altogether, with the record of who used it (they keep their accounts)\n";
 
+    public const string BackupsUsage =
+        "Usage:\n" +
+        "  backups copy-to-s3 [--dry-run]  copy the backup files in the data folder into the bucket (the S3 settings have to be set); it can be run again, a version already\n" +
+        "                                  there is left alone, and nothing is removed from the data folder\n";
+
+    /// <summary><c>backups copy-to-s3</c>: moves a service that kept its backups as files over to an S3-compatible store (see <see cref="BackupCopy"/>).</summary>
+    public static async Task<int> RunBackupsAsync(string[] args, ServiceOptions options, TextWriter output)
+    {
+        if (args.Length == 0 || !args[0].Equals("copy-to-s3", StringComparison.OrdinalIgnoreCase)) { output.Write(BackupsUsage); return 2; }
+        if (options.S3Bucket.Length == 0 || options.S3Endpoint.Length == 0)
+        {
+            output.WriteLine("Set Service__S3Endpoint, Service__S3Bucket, Service__S3AccessKey and Service__S3SecretKey first: that is where the backups are copied to.");
+            return 2;
+        }
+        bool dryRun = args.Contains("--dry-run");
+        using var s3 = S3BackupStore.CreateClient(options);
+        var result = await BackupCopy.CopyAsync(options, s3, output, dryRun, CancellationToken.None);
+        output.WriteLine($"{(dryRun ? "Would copy" : "Copied")} {result.Copied} version{(result.Copied == 1 ? "" : "s")} ({result.Bytes / 1024.0 / 1024.0:0.0} MiB); {result.AlreadyThere} already in the bucket" +
+                         (result.Different > 0 ? $"; {result.Different} in the bucket with another size (left alone, look at them)" : "") + ".");
+        if (!dryRun && result.Different == 0) output.WriteLine("The files in the data folder are still there. When you have checked the service on the bucket you can remove them.");
+        return result.Different > 0 ? 1 : 0;
+    }
+
     public static Task<int> RunCodesAsync(string[] args, ServiceOptions options, TextWriter output) => RunCodesAsync(args, options, output, DateTimeOffset.UtcNow);
 
     internal static Task<int> RunCodesAsync(string[] args, ServiceOptions options, TextWriter output, DateTimeOffset now)
@@ -101,7 +124,7 @@ public static class AdminCommands
     public static async Task<int> RunAsync(string[] args, ServiceOptions options, TextWriter output)
     {
         var accounts = Stores.Accounts(options);
-        var store = new BackupStore(options);
+        var store = Stores.Backups(options);
         var command = args.FirstOrDefault()?.ToLowerInvariant();
         var rest = args.Skip(1).ToList();
 
@@ -172,7 +195,7 @@ public static class AdminCommands
                 {
                     if (AccountDirectory.Normalize(account.Name) != account.Name)
                         output.WriteLine($"{account.Name}  is not an email address, so it cannot sign in any more: remove it and add the person again with their address.");
-                    var versions = store.Versions(BackupStore.FolderOf(account.Name));
+                    var versions = await store.VersionsAsync(BackupStore.FolderOf(account.Name));
                     var size = versions.Sum(v => v.Size);
                     output.WriteLine($"{account.Name,-32} made {account.Created:yyyy-MM-dd}  " +
                         (account.HasPassword ? $"{account.Devices} device{(account.Devices == 1 ? "" : "s")} signed in"

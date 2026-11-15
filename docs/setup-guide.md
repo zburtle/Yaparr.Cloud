@@ -175,6 +175,28 @@ By default the accounts and signup codes are two JSON files in the data volume, 
 
 **Upgrading Postgres.** The image is `postgres:17-alpine`: security fixes within version 17 arrive by pulling the image and restarting (`docker compose pull postgres && docker compose up -d`). Moving to a new major version is a dump and restore (`pg_dump`, a new volume, `psql`), not a pull.
 
+## 10d. Moving the backups to S3 (Cloudflare R2 or DigitalOcean Spaces; optional)
+
+By default the backups are files in the data volume, so how many the machine can keep depends on its disk, and losing the machine loses them. In an S3-compatible bucket they are off the machine (and a smaller droplet will do). What is stored is only what the app has locked, so the bucket holds nothing readable either way.
+
+**Cloudflare R2** (no monthly minimum, no charge for downloads, the first 10 GB free; about $0.015 per GB-month after that):
+
+1. In the Cloudflare dashboard, **R2 Object Storage**, turn R2 on (it asks for a payment method even for the free tier) and **Create bucket**, for example `yaparr-backups`. Pick the location deliberately: **Automatic** is closest to where it is made, a location hint or the **EU jurisdiction** can be chosen only now, **a bucket's jurisdiction cannot be changed afterwards**.
+2. **Manage API tokens**, make an **S3 API token** with **Object Read & Write**, limited to that one bucket. Copy the Access Key ID and Secret Access Key now, they are shown once.
+3. The endpoint is `https://<your account id>.r2.cloudflarestorage.com` (the EU jurisdiction has `.eu.` before `r2`): the account id, **without** the bucket name.
+
+**DigitalOcean Spaces** works the same with its own endpoint (`https://<region>.digitaloceanspaces.com`) and region (`nyc3`): $5 a month for 250 GiB and 1 TiB of transfer. Spaces may not take conditional writes: if the tests or a save complain about the `If-None-Match` header, set `S3_CONDITIONAL_WRITES=false` in `.env`.
+
+Moving over:
+
+1. Add to `.env` on the machine (see `.env.example`): `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, and `S3_REGION` (`auto` for R2).
+2. Deploy the version that has this (`./deploy.sh deploy`). **Before it carries on, copy the existing backups** (the service reads the bucket from then on, so until they are copied people see no backup): `docker compose exec cloud dotnet Yaparr.Cloud.dll backups copy-to-s3 --dry-run`, then without `--dry-run`. It can be run again and again (a version already there is left alone, one with another size is reported, nothing is removed from the data folder). Do it right after the deploy; a backup saved in between goes to the bucket as it should, and a restore in between finds only that one.
+3. Check: sign in on the backup server in Yaparr and **Back up now**, then **Restore** on a spare profile; `docker compose exec cloud dotnet Yaparr.Cloud.dll accounts list` shows the sizes from the bucket.
+4. When you are satisfied, remove the old files from the data volume (`docker compose exec cloud sh -c 'rm -r /data/[0-9a-f]*'`: the folders named by a 64-digit hash; leave `accounts.json` and the rest). Take a copy of the data folder first (`docker compose cp cloud:/data ./cloud-data-$(date +%F)`).
+5. To go back to files: take the S3 lines out of `.env`, copy the objects back (for example with `rclone copy`), and deploy.
+
+**Cost.** Storage dominates: with backups of about 50 MiB and 5 versions each, 100 accounts is about 24 GiB (R2: about $0.20 a month), 1,000 accounts about 244 GiB (about $3.50), 5,000 accounts about 1.2 TiB (about $18). Requests are small (a save is one put and one list) and R2's free tier covers a million of each class a month. Downloads are free on R2.
+
 ## 10b. The published image
 
 After a merge to `master`, CI builds the image and publishes it to `ghcr.io/zburtle/yaparr-cloud`, tagged `sha-<commit>` and `latest`. `deploy.sh` pulls the one for the commit it checked out, so the droplet no longer builds anything (and needs no spare memory or disk for it). If there is no such image (a branch, or `ghcr.io` cannot be reached) it builds the image itself, as before. Anyone can run the service without cloning this repository: `docker run -p 8080:8080 -v cloud-data:/data ghcr.io/zburtle/yaparr-cloud:latest`.

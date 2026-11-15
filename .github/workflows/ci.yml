@@ -32,8 +32,16 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
+      # An S3-compatible server for the tests of the bucket store (it does not decide racing conditional puts atomically, so that one test is left to a real store).
+      s3:
+        image: adobe/s3mock:latest
+        env:
+          initialBuckets: yaparr-test
+        ports:
+          - 9090:9090
     env:
       YAPARR_TEST_POSTGRES: Host=localhost;Port=5432;Username=yaparr;Password=test;Database=yaparr
+      YAPARR_TEST_S3: http://localhost:9090;yaparr-test;test;test;us-east-1
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4

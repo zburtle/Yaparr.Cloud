@@ -7,7 +7,7 @@ using System.Text.RegularExpressions;
 namespace Yaparr.Cloud;
 
 /// <summary>An account as the admin sees it. <paramref name="Pass"/> is what kind of pass it has ("lifetime" for everyone so far).</summary>
-public sealed record AccountEntry(string Name, DateTimeOffset Created, int Devices, bool HasPassword, string Pass, string? SignupCode);
+public sealed record AccountEntry(string Name, DateTimeOffset Created, int Devices, bool HasPassword, string Pass, string? SignupCode, bool IsAdmin = false);
 
 /// <summary>
 /// Who may use the service (<c>accounts.json</c> in the data folder): each account, named by its owner's email address, with the hash of its password and the devices that are signed
@@ -39,6 +39,9 @@ public sealed partial class AccountDirectory
         /// <summary>For an account made by signing up that has not chosen a password yet: the hash of the one-use token that lets them, and when it ends.</summary>
         public string? SetupHash { get; set; }
         public DateTimeOffset? SetupExpires { get; set; }
+        /// <summary>Whether this account may sign in to the admin portal (set only from the command line), and the secret of its authenticator app.</summary>
+        public bool Admin { get; set; }
+        public string? TotpSecret { get; set; }
     }
 
     private sealed class FileModel
@@ -127,8 +130,56 @@ public sealed partial class AccountDirectory
         {
             Refresh();
             return _users.OrderBy(u => u.Key, StringComparer.Ordinal)
-                .Select(u => new AccountEntry(u.Key, u.Value.Created, u.Value.Devices.Count, u.Value.PasswordHash != null, u.Value.Pass, u.Value.SignupCode)).ToList();
+                .Select(u => new AccountEntry(u.Key, u.Value.Created, u.Value.Devices.Count, u.Value.PasswordHash != null, u.Value.Pass, u.Value.SignupCode, u.Value.Admin)).ToList();
         }
+    }
+
+    /// <summary>
+    /// Lets an account sign in to the admin portal, and returns the secret for its authenticator app (a new one each time, so running this again
+    /// replaces a lost phone). Null if there is no such account or it has no password yet.
+    /// </summary>
+    public string? MakeAdmin(string name)
+    {
+        lock (_gate)
+        {
+            Refresh();
+            if (!_users.TryGetValue(name, out var entry) || entry.PasswordHash == null) return null;
+            entry.Admin = true;
+            entry.TotpSecret = Totp.NewSecret();
+            Save();
+            return entry.TotpSecret;
+        }
+    }
+
+    /// <summary>Takes the portal away from an account. False if there is no such account or it was not an admin.</summary>
+    public bool RemoveAdmin(string name)
+    {
+        lock (_gate)
+        {
+            Refresh();
+            if (!_users.TryGetValue(name, out var entry) || !entry.Admin) return false;
+            entry.Admin = false;
+            entry.TotpSecret = null;
+            Save();
+            return true;
+        }
+    }
+
+    public bool IsAdmin(string name)
+    {
+        lock (_gate) { Refresh(); return _users.TryGetValue(name, out var entry) && entry.Admin; }
+    }
+
+    /// <summary>Whether anyone may use the admin portal. Until someone does, the portal does not exist (every address under /admin answers 404).</summary>
+    public bool AnyAdmin()
+    {
+        lock (_gate) { Refresh(); return _users.Values.Any(u => u.Admin); }
+    }
+
+    /// <summary>The authenticator secret of an admin, or null for anyone else.</summary>
+    internal string? TotpSecretOf(string name)
+    {
+        lock (_gate) { Refresh(); return _users.TryGetValue(name, out var entry) && entry.Admin ? entry.TotpSecret : null; }
     }
 
     /// <summary>Adds an account with a password. False if the name is taken.</summary>

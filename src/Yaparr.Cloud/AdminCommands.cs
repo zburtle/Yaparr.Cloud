@@ -11,7 +11,8 @@ public static class AdminCommands
         "  accounts add <email> [--password <password>]           make an account (named by the person's email address); without a password one is made up and shown once\n" +
         "  accounts password <email> [--password <password>]      give an account a new password and sign its devices out\n" +
         "  accounts remove <email> [--keep-backup]                remove an account and, unless told not to, its backup\n" +
-        "  accounts list                                          who has an account, their devices, and the space each uses\n";
+        "  accounts list                                          who has an account, their devices, and the space each uses\n" +
+        "  accounts admin <email> [--remove]                      let an account sign in to the admin portal (/admin): shows the secret for its authenticator app once; --remove takes it away\n";
 
     public const string CodesUsage =
         "Usage:\n" +
@@ -137,6 +138,24 @@ public static class AdminCommands
                 else output.WriteLine(await store.DeleteAsync(BackupStore.FolderOf(name), CancellationToken.None) ? "Its backup was deleted." : "It had no backup.");
                 return 0;
             }
+            case "admin":
+            {
+                if (rest.Count == 0) { output.Write(Usage); return 2; }
+                var name = AccountDirectory.Normalize(rest[0]);
+                if (name == null) { output.WriteLine("That is not a usable email address."); return 2; }
+                if (rest.Contains("--remove"))
+                {
+                    if (!accounts.RemoveAdmin(name)) { output.WriteLine($"{name} is not an admin."); return 1; }
+                    output.WriteLine($"{name} can no longer sign in to the admin portal.");
+                    return 0;
+                }
+                if (accounts.MakeAdmin(name) is not { } secret) { output.WriteLine("There is no such account, or it has not chosen a password yet."); return 1; }
+                output.WriteLine($"{name} can now sign in to the admin portal, at /admin, with the password and a code from an authenticator app.");
+                output.WriteLine($"Add this to the app (it asks for a key or a setup link): the key is  {secret}");
+                output.WriteLine($"or the link  {Totp.Uri(name, "Yaparr cloud", secret)}");
+                output.WriteLine("It is shown once. Running this again makes a new key (for a lost phone) and the old one stops working.");
+                return 0;
+            }
             case "list":
             {
                 var all = accounts.List();
@@ -150,7 +169,7 @@ public static class AdminCommands
                     output.WriteLine($"{account.Name,-32} made {account.Created:yyyy-MM-dd}  " +
                         (account.HasPassword ? $"{account.Devices} device{(account.Devices == 1 ? "" : "s")} signed in"
                             : account.SignupCode != null ? "signed up, has not chosen a password yet"
-                            : "NO PASSWORD (run: accounts password " + account.Name + ")") + $"  {account.Pass} pass" + (account.SignupCode != null ? $" (code {account.SignupCode})" : "") + "  " +
+                            : "NO PASSWORD (run: accounts password " + account.Name + ")") + $"  {account.Pass} pass" + (account.SignupCode != null ? $" (code {account.SignupCode})" : "") + (account.IsAdmin ? "  ADMIN" : "") + "  " +
                         (versions.Count == 0 ? "no backup" : $"{versions.Count} version{(versions.Count == 1 ? "" : "s")}, {size / 1024.0 / 1024.0:0.0} MiB, last {versions[0].At:yyyy-MM-dd HH:mm}"));
                 }
                 return 0;

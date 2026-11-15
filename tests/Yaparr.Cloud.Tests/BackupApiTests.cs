@@ -25,8 +25,8 @@ public abstract class ServiceTest : IDisposable
             foreach (var (key, value) in settings ?? new()) b.UseSetting("Service:" + key, value);
         });
         _factories.Add(factory);
-        // A browser is sent from page to page; the tests look at each step, so they do not follow.
-        return factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        // A browser is sent from page to page; the tests look at each step, so they do not follow. Cookies are sent by hand, so a test says when one is.
+        return factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false, HandleCookies = false });
     }
 
     public void Dispose()

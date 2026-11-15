@@ -37,6 +37,10 @@ public static class Stores
     internal static ISignupCodes Codes(ServiceOptions options, Func<DateTimeOffset> now) =>
         options.Database.Length > 0 ? new PostgresSignupCodes(Source(options), now) : new SignupCodes(options, now);
 
+    /// <summary>Where backups are kept: in the bucket when <see cref="ServiceOptions.S3Bucket"/> is set, as files in the data folder otherwise.</summary>
+    public static IBackupStore Backups(ServiceOptions options) =>
+        options.S3Bucket.Length > 0 ? new S3BackupStore(S3BackupStore.CreateClient(options), options) : new BackupStore(options);
+
     /// <summary>Forgets that a database was imported into and closes it (for tests).</summary>
     internal static void Forget(string connectionString)
     {

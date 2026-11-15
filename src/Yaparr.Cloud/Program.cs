@@ -5,11 +5,13 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Http.Features;
 using Yaparr.Cloud;
 
-// "accounts add|password|remove|list" and "codes add|list|revoke" look after who may use the service and then exit; anything else runs the service.
-if (args.Length > 0 && (args[0].Equals("accounts", StringComparison.OrdinalIgnoreCase) || args[0].Equals("codes", StringComparison.OrdinalIgnoreCase)))
+// "accounts ...", "codes ..." and "backups ..." look after who may use the service and where its backups are kept, and then exit; anything else runs the service.
+if (args.Length > 0 && (args[0].Equals("accounts", StringComparison.OrdinalIgnoreCase) || args[0].Equals("codes", StringComparison.OrdinalIgnoreCase)
+                        || args[0].Equals("backups", StringComparison.OrdinalIgnoreCase)))
 {
     var config = new ConfigurationBuilder().SetBasePath(AppContext.BaseDirectory).AddJsonFile("appsettings.json", optional: true).AddEnvironmentVariables().Build();
     var settings = config.GetSection("Service").Get<ServiceOptions>() ?? new ServiceOptions();
+    if (args[0].Equals("backups", StringComparison.OrdinalIgnoreCase)) return await AdminCommands.RunBackupsAsync(args[1..], settings, Console.Out);
     return args[0].Equals("codes", StringComparison.OrdinalIgnoreCase)
         ? await AdminCommands.RunCodesAsync(args[1..], settings, Console.Out)
         : await AdminCommands.RunAsync(args[1..], settings, Console.Out);
@@ -18,7 +20,7 @@ if (args.Length > 0 && (args[0].Equals("accounts", StringComparison.OrdinalIgnor
 var builder = WebApplication.CreateBuilder(args);
 var options = builder.Configuration.GetSection("Service").Get<ServiceOptions>() ?? new ServiceOptions();
 builder.Services.AddSingleton(options);
-builder.Services.AddSingleton<BackupStore>();
+builder.Services.AddSingleton<IBackupStore>(_ => Stores.Backups(options));
 builder.Services.AddSingleton<IAccounts>(_ => Stores.Accounts(options));
 builder.Services.AddSingleton<ISignupCodes>(_ => Stores.Codes(options));
 builder.Services.AddSingleton<WriteLimiter>();
@@ -196,7 +198,7 @@ app.MapAdminPortal(options);
 
 var backup = app.MapGroup("/v1/backup");
 
-backup.MapPut("", async (HttpContext http, BackupStore store, WriteLimiter writes, IAccounts accounts, CancellationToken cancel) =>
+backup.MapPut("", async (HttpContext http, IBackupStore store, WriteLimiter writes, IAccounts accounts, CancellationToken cancel) =>
 {
     if (accounts.UserOfToken(BearerOf(http)) is not { } user) return Problem(StatusCodes.Status401Unauthorized, NotSignedIn);
 
@@ -219,21 +221,22 @@ backup.MapPut("", async (HttpContext http, BackupStore store, WriteLimiter write
     };
 });
 
-backup.MapGet("", (HttpContext http, BackupStore store, IAccounts accounts, int? version) =>
+backup.MapGet("", async (HttpContext http, IBackupStore store, IAccounts accounts, int? version, CancellationToken cancel) =>
 {
     if (accounts.UserOfToken(BearerOf(http)) is not { } user) return Problem(StatusCodes.Status401Unauthorized, NotSignedIn);
-    var found = store.Open(BackupStore.FolderOf(user), version);
+    var found = await store.OpenAsync(BackupStore.FolderOf(user), version, cancel);
     if (found == null) return Problem(StatusCodes.Status404NotFound, "There is no backup.");
     http.Response.Headers["X-Yaparr-Version"] = found.Value.Info.Version.ToString(CultureInfo.InvariantCulture);
+    http.Response.ContentLength = found.Value.Info.Size;
     return Results.Stream(found.Value.Content, "application/octet-stream");
 });
 
-backup.MapGet("/versions", (HttpContext http, BackupStore store, IAccounts accounts) =>
+backup.MapGet("/versions", async (HttpContext http, IBackupStore store, IAccounts accounts, CancellationToken cancel) =>
     accounts.UserOfToken(BearerOf(http)) is { } user
-        ? Results.Json(new { username = user, versions = store.Versions(BackupStore.FolderOf(user)).Select(v => new { version = v.Version, size = v.Size, at = v.At }) })
+        ? Results.Json(new { username = user, versions = (await store.VersionsAsync(BackupStore.FolderOf(user), cancel)).Select(v => new { version = v.Version, size = v.Size, at = v.At }) })
         : Problem(StatusCodes.Status401Unauthorized, NotSignedIn));
 
-backup.MapDelete("", async (HttpContext http, BackupStore store, IAccounts accounts, CancellationToken cancel) =>
+backup.MapDelete("", async (HttpContext http, IBackupStore store, IAccounts accounts, CancellationToken cancel) =>
 {
     if (accounts.UserOfToken(BearerOf(http)) is not { } user) return Problem(StatusCodes.Status401Unauthorized, NotSignedIn);
     return await store.DeleteAsync(BackupStore.FolderOf(user), cancel) ? Results.NoContent() : Problem(StatusCodes.Status404NotFound, "There is no backup.");

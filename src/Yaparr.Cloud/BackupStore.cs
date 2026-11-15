@@ -4,17 +4,10 @@ using System.Security.Cryptography;
 
 namespace Yaparr.Cloud;
 
-public sealed record BackupVersion(int Version, long Size, DateTimeOffset At);
-
-public enum SaveOutcome { Saved, Conflict, TooLarge, NotALockedBackup }
-
-public sealed record SaveResult(SaveOutcome Outcome, int Version = 0, long Size = 0);
-
 /// <summary>
-/// Keeps one backup per account, as numbered versions. The server never holds a readable backup: what it accepts is checked to be a locked one
-/// (<see cref="Magic"/> is the first thing in it), so a plain zip, which would hold someone's identity key, is refused instead of stored.
+/// The backups as files in the data folder, one folder per account with numbered versions (see <see cref="IBackupStore"/>).
 /// </summary>
-public sealed class BackupStore
+public sealed class BackupStore : IBackupStore
 {
     /// <summary>The start of a locked Yaparr backup (<c>ProfileCipher</c> in the app).</summary>
     public static readonly byte[] Magic = "YAPBAK1\n"u8.ToArray();
@@ -40,12 +33,14 @@ public sealed class BackupStore
 
     private static string FileName(int version) => "v" + version.ToString("D8", CultureInfo.InvariantCulture) + ".bin";
 
-    // An account is 64 hex characters, so it can never name anything outside the data folder.
-    private string Folder(string account)
+    // An account is 64 hex characters, so it can never name anything outside the data folder (or a key outside its own prefix).
+    internal static string CheckAccount(string account)
     {
         if (account.Length != 64 || !account.All(c => c is (>= '0' and <= '9') or (>= 'a' and <= 'f'))) throw new ArgumentException("Not an account.", nameof(account));
-        return Path.Combine(_root, account);
+        return account;
     }
+
+    private string Folder(string account) => Path.Combine(_root, CheckAccount(account));
 
     private List<BackupVersion> List(string folder)
     {
@@ -62,6 +57,10 @@ public sealed class BackupStore
     }
 
     public IReadOnlyList<BackupVersion> Versions(string account) => List(Folder(account));
+
+    public Task<IReadOnlyList<BackupVersion>> VersionsAsync(string account, CancellationToken cancel = default) => Task.FromResult(Versions(account));
+
+    public Task<(Stream Content, BackupVersion Info)?> OpenAsync(string account, int? version, CancellationToken cancel = default) => Task.FromResult(Open(account, version));
 
     /// <summary>Opens a version (the newest if <paramref name="version"/> is null) for reading, or null if there is none.</summary>
     public (Stream Content, BackupVersion Info)? Open(string account, int? version)

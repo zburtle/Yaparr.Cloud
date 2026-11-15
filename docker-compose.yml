@@ -23,6 +23,14 @@ services:
       # Where accounts and signup codes are kept: empty is files in /data (as before); set SERVICE_DATABASE in .env, with COMPOSE_PROFILES=postgres, to use the
       # postgres container below (docs/setup-guide.md, "Moving to Postgres"). Backups are files either way.
       Service__Database: "${SERVICE_DATABASE:-}"
+      # Where backups are kept: empty is files in /data (as before); with S3_BUCKET set they are objects in an S3-compatible bucket (Cloudflare R2, DigitalOcean
+      # Spaces, MinIO): see docs/setup-guide.md, "Moving the backups to S3". The key should be able to read and write that one bucket only.
+      Service__S3Endpoint: "${S3_ENDPOINT:-}"
+      Service__S3Bucket: "${S3_BUCKET:-}"
+      Service__S3AccessKey: "${S3_ACCESS_KEY:-}"
+      Service__S3SecretKey: "${S3_SECRET_KEY:-}"
+      Service__S3Region: "${S3_REGION:-auto}"
+      Service__S3ConditionalWrites: "${S3_CONDITIONAL_WRITES:-true}"   # false for a store that does not take If-None-Match
       # Service__KeepVersions: "3"      # the newest versions always kept ...
       # Service__KeepDays: "7"          # ... and the newest of each of this many days
       # Service__WritesPerHour: "12"

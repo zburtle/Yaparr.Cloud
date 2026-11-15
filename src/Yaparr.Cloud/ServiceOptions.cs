@@ -25,6 +25,31 @@ public sealed class ServiceOptions
     /// </summary>
     public string Database { get; set; } = "";
 
+    /// <summary>
+    /// With a bucket name, backups are kept as objects in an S3-compatible store (Cloudflare R2, DigitalOcean Spaces, MinIO) at <see cref="S3Endpoint"/>
+    /// instead of as files in the data folder. Use a key that can only read and write that one bucket. Without one, they are files.
+    /// </summary>
+    public string S3Bucket { get; set; } = "";
+
+    /// <summary>The store's address, for R2 <c>https://&lt;account id&gt;.r2.cloudflarestorage.com</c> (without the bucket name).</summary>
+    public string S3Endpoint { get; set; } = "";
+
+    public string S3AccessKey { get; set; } = "";
+
+    public string S3SecretKey { get; set; } = "";
+
+    /// <summary>The region name the store signs for: <c>auto</c> for R2, the region (<c>nyc3</c>) for Spaces.</summary>
+    public string S3Region { get; set; } = "auto";
+
+    /// <summary>A prefix for every key, so a bucket can be shared (<c>backups/</c> by default).</summary>
+    public string S3Prefix { get; set; } = "backups/";
+
+    /// <summary>
+    /// Whether a save is put with <c>If-None-Match: *</c>, so that it only succeeds if nobody saved that version first (R2 and MinIO take it). Turn it off for
+    /// a store that does not; the check made before the upload still stops two devices, only two copies of the service at once could then both save.
+    /// </summary>
+    public bool S3ConditionalWrites { get; set; } = true;
+
     /// <summary>Requests per minute from one account (or one address, for a request that is not signed).</summary>
     public int RequestsPerMinute { get; set; } = 120;
 

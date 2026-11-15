@@ -106,7 +106,12 @@ Set `BehindProxy` to `true` only when a reverse proxy is in front (it should be,
 
 ### Storage
 
-Files, one folder per account (the hex SHA-256 of its email address) with numbered versions, written to a temporary file and moved into place. `BackupStore` is the only thing that touches them, so S3 or similar can replace it later. They are not put in the database: they are large, already encrypted (so a database could neither compress nor search them), and would be copied into every database backup.
+Backups are kept one of two ways, behind `IBackupStore` (versions, open, save with the `If-Match` version check, delete):
+
+- **Files** (the default), `BackupStore`: one folder per account (the hex SHA-256 of its email address) with numbered versions, written to a temporary file and moved into place.
+- **An S3-compatible bucket** (Cloudflare R2, DigitalOcean Spaces, MinIO), `S3BackupStore`, when `Service__S3Bucket` is set: one object per version under `<prefix><account hash>/v00000003.bin`. A save is written to a temporary file first (so the size and the locked-backup header are checked before anything leaves the machine), then put with `If-None-Match: *`, so two saves of the same version cannot both win, even from two copies of the service (a store that does not take the header: `Service__S3ConditionalWrites=false`). Old versions are deleted by the same rule as for files. `backups copy-to-s3` copies existing files into the bucket. The same tests run against both (`BackupStoreContractTests`); the bucket ones need `YAPARR_TEST_S3` (`endpoint;bucket;access key;secret key;region`, CI runs a test server) and the one that races two copies needs a store that decides conditional puts atomically (`YAPARR_TEST_S3_ATOMIC=1`: R2 does).
+
+Whichever way, the server never holds anything readable: a plain zip, which would hold someone's identity key, is refused. They are not put in the database (the S3 option above is where they go if the disk is not): they are large, already encrypted (so a database could neither compress nor search them), and would be copied into every database backup.
 
 Accounts (email addresses, password hashes, token hashes, passes, the admin flag and authenticator secret) and signup codes (as hashes, with who used them) are kept one of two ways, behind `IAccounts` and `ISignupCodes`:
 

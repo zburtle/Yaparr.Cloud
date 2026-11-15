@@ -15,7 +15,7 @@ public sealed record AccountEntry(string Name, DateTimeOffset Created, int Devic
 /// signed in holds a token, a long random secret; only its SHA-256 is kept here, so the file is of no use for signing in as someone.
 /// The file is read again whenever it changes, so the admin commands need no restart of the service.
 /// </summary>
-public sealed partial class AccountDirectory
+public sealed partial class AccountDirectory : IAccounts
 {
     private sealed class Device
     {
@@ -49,8 +49,8 @@ public sealed partial class AccountDirectory
         public Dictionary<string, Entry> Users { get; set; } = new();
     }
 
-    private const int MaxDevicesPerAccount = 20;
-    private const string TokenPrefix = "ycl_";
+    internal const int MaxDevicesPerAccount = 20;
+    internal const string TokenPrefix = "ycl_";
 
     private readonly string _path;
     private readonly object _gate = new();
@@ -124,6 +124,17 @@ public sealed partial class AccountDirectory
         lock (_gate) { Refresh(); return _users.TryGetValue(name, out var entry) && entry.PasswordHash != null; }
     }
 
+    /// <summary>Everything about every account, as it is kept (for moving the accounts to a database).</summary>
+    internal IReadOnlyList<ExportedAccount> Export()
+    {
+        lock (_gate)
+        {
+            Refresh();
+            return _users.Select(u => new ExportedAccount(u.Key, u.Value.PasswordHash, u.Value.Created, u.Value.Pass, u.Value.SignupCode, u.Value.SetupHash, u.Value.SetupExpires,
+                u.Value.Admin, u.Value.TotpSecret, u.Value.Devices.Select(d => new ExportedDevice(d.Hash, d.Name, d.Created)).ToList())).ToList();
+        }
+    }
+
     public IReadOnlyList<AccountEntry> List()
     {
         lock (_gate)
@@ -177,7 +188,7 @@ public sealed partial class AccountDirectory
     }
 
     /// <summary>The authenticator secret of an admin, or null for anyone else.</summary>
-    internal string? TotpSecretOf(string name)
+    public string? TotpSecretOf(string name)
     {
         lock (_gate) { Refresh(); return _users.TryGetValue(name, out var entry) && entry.Admin ? entry.TotpSecret : null; }
     }
@@ -196,7 +207,7 @@ public sealed partial class AccountDirectory
         }
     }
 
-    private static readonly TimeSpan SetupLifetime = TimeSpan.FromMinutes(30);
+    internal static readonly TimeSpan SetupLifetime = TimeSpan.FromMinutes(30);
 
     /// <summary>
     /// Begins an account made by signing up: it exists, with a lifetime pass, but cannot sign in until the person has chosen a password with the one-use
@@ -293,7 +304,7 @@ public sealed partial class AccountDirectory
         }
     }
 
-    private static string HashOf(string token) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
+    internal static string HashOf(string token) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
 
     /// <summary>
     /// Signs a device in: makes its token, which is shown to that device once and kept here only as a hash. The oldest device is signed out when

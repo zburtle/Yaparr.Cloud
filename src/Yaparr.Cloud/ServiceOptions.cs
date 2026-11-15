@@ -18,6 +18,13 @@ public sealed class ServiceOptions
     /// </summary>
     public int KeepDays { get; set; } = 7;
 
+    /// <summary>
+    /// A Postgres connection string (<c>Host=postgres;Database=yaparr;Username=yaparr;Password=...</c>). With one, accounts and signup codes are kept in the
+    /// database, which is made and brought up to date when the service starts, and the files from before (<c>accounts.json</c>, <c>codes.json</c>) are
+    /// imported once. Without one they are kept in those files. Backups are files either way.
+    /// </summary>
+    public string Database { get; set; } = "";
+
     /// <summary>Requests per minute from one account (or one address, for a request that is not signed).</summary>
     public int RequestsPerMinute { get; set; } = 120;
 

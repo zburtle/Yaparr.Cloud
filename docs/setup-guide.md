@@ -154,6 +154,27 @@ Merge the app's pull request. The app is released with `yaparr.release.json` bes
 | Make, list or stop signup codes | `docker compose exec cloud dotnet Yaparr.Cloud.dll codes add` / `codes list` / `codes revoke <id>` |
 | Copy all the data off the machine | `docker compose cp cloud:/data ./cloud-data-$(date +%F)` |
 
+## 10c. Moving to Postgres (optional)
+
+By default the accounts and signup codes are two JSON files in the data volume, which limits the service to one instance and rewrites a whole file on every change. Postgres, in a second container on the same machine, removes those limits. The backups stay files either way (they are big and already encrypted: see the README).
+
+1. On the machine, in `~/Yaparr.Cloud`, add three lines to `.env` (make a long random password, for example with `openssl rand -base64 24`; avoid `;` and `=` in it):
+
+   ```
+   COMPOSE_PROFILES=postgres
+   POSTGRES_PASSWORD=the long password
+   SERVICE_DATABASE=Host=postgres;Database=yaparr;Username=yaparr;Password=the long password
+   ```
+
+2. **Make a copy of the data folder first**: `docker compose cp cloud:/data ./cloud-data-$(date +%F)`.
+3. Deploy a version with this change (`./deploy.sh deploy`, or a merge to `master` with automatic deploys). The first start with a database that has nothing in it copies `accounts.json` and `codes.json` in and renames them `accounts.json.imported` and `codes.json.imported`. Check with `docker compose exec cloud dotnet Yaparr.Cloud.dll accounts list` and `codes list`: everyone is there, and everyone stays signed in.
+4. **Back the database up** along with the backup files. For example, from a daily cron job on the machine: `docker compose exec -T postgres pg_dump -U yaparr yaparr | gzip > ~/db-backups/yaparr-$(date +%F).sql.gz`, and keep the last few. The `pg-data` volume holds the live database; the data volume holds the backups and the `.imported` files.
+5. To go back to files: take the three lines out of `.env`, move the `.imported` files back to `accounts.json` and `codes.json` (changes made while on Postgres are not in them), and deploy.
+
+**Size.** The container is tuned small (`shared_buffers` 32 MB, 20 connections, a 256 MB limit) and uses about 25 MB when idle; the service uses about 75 MB and Caddy about 12 MB. That fits 1 vCPU and 1 GB with room to spare, but turn on swap first (the 1 GB advice in section 2) and watch `docker stats` for a while before shrinking a bigger droplet. Each sign-in uses 32 MB for a moment (the password hash), so many at once cost more.
+
+**Upgrading Postgres.** The image is `postgres:17-alpine`: security fixes within version 17 arrive by pulling the image and restarting (`docker compose pull postgres && docker compose up -d`). Moving to a new major version is a dump and restore (`pg_dump`, a new volume, `psql`), not a pull.
+
 ## 10b. The published image
 
 After a merge to `master`, CI builds the image and publishes it to `ghcr.io/zburtle/yaparr-cloud`, tagged `sha-<commit>` and `latest`. `deploy.sh` pulls the one for the commit it checked out, so the droplet no longer builds anything (and needs no spare memory or disk for it). If there is no such image (a branch, or `ghcr.io` cannot be reached) it builds the image itself, as before. Anyone can run the service without cloning this repository: `docker run -p 8080:8080 -v cloud-data:/data ghcr.io/zburtle/yaparr-cloud:latest`.

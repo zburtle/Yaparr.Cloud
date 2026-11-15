@@ -24,7 +24,7 @@ public sealed record SignupCodeInfo(string Id, string Note, DateTimeOffset Creat
 /// until it is revoked or runs out. A code only ever comes to the server in someone's sign-up, never to the website that hosts the page. Like the
 /// accounts, the file is read again whenever it changes, so the admin commands need no restart.
 /// </summary>
-public sealed class SignupCodes
+public sealed class SignupCodes : ISignupCodes
 {
     private sealed class UseRecord
     {
@@ -49,7 +49,7 @@ public sealed class SignupCodes
         public Dictionary<string, string> Hashes { get; set; } = new();   // full hash -> id
     }
 
-    private const string Alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    internal const string Alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     private readonly string _path;
     private readonly object _gate = new();
     private readonly Func<DateTimeOffset> _now;
@@ -74,8 +74,8 @@ public sealed class SignupCodes
         return letters.Length == 16 && letters.All(Alphabet.Contains) ? letters : null;
     }
 
-    private static string Show(string letters) => string.Join('-', Enumerable.Range(0, 4).Select(g => letters.Substring(g * 4, 4)));
-    private static string HashOf(string letters) => Convert.ToHexStringLower(SHA256.HashData(Encoding.ASCII.GetBytes("yaparr-signup:" + letters)));
+    internal static string Show(string letters) => string.Join('-', Enumerable.Range(0, 4).Select(g => letters.Substring(g * 4, 4)));
+    internal static string HashOf(string letters) => Convert.ToHexStringLower(SHA256.HashData(Encoding.ASCII.GetBytes("yaparr-signup:" + letters)));
 
     private void Refresh()
     {
@@ -120,6 +120,18 @@ public sealed class SignupCodes
             Save();
         }
         return (Show(letters), Info(id, entry));
+    }
+
+    /// <summary>Every code with its hash and uses, as kept (for moving the codes to a database).</summary>
+    internal IReadOnlyList<ExportedCode> Export()
+    {
+        lock (_gate)
+        {
+            Refresh();
+            var hashOf = _model.Hashes.ToDictionary(h => h.Value, h => h.Key);
+            return _model.Codes.Where(c => hashOf.ContainsKey(c.Key)).Select(c => new ExportedCode(c.Key, hashOf[c.Key], c.Value.Note, c.Value.Created, c.Value.MaxUses, c.Value.Expires,
+                c.Value.Revoked, c.Value.Uses.Select(u => new CodeUse(u.Email, u.At)).ToList())).ToList();
+        }
     }
 
     public IReadOnlyList<SignupCodeInfo> List()

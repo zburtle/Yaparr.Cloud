@@ -26,7 +26,7 @@ public static class AdminCommands
 
     internal static Task<int> RunCodesAsync(string[] args, ServiceOptions options, TextWriter output, DateTimeOffset now)
     {
-        var codes = new SignupCodes(options, () => now);
+        var codes = Stores.Codes(options, () => now);
         var command = args.FirstOrDefault()?.ToLowerInvariant();
         var rest = args.Skip(1).ToList();
         switch (command)
@@ -100,7 +100,7 @@ public static class AdminCommands
 
     public static async Task<int> RunAsync(string[] args, ServiceOptions options, TextWriter output)
     {
-        var accounts = new AccountDirectory(options);
+        var accounts = Stores.Accounts(options);
         var store = new BackupStore(options);
         var command = args.FirstOrDefault()?.ToLowerInvariant();
         var rest = args.Skip(1).ToList();

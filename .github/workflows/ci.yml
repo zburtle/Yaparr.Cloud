@@ -17,6 +17,23 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # The tests of the stores run against a real Postgres as well as the files (they are skipped where YAPARR_TEST_POSTGRES is not set).
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: yaparr
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: yaparr
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U yaparr -d yaparr"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      YAPARR_TEST_POSTGRES: Host=localhost;Port=5432;Username=yaparr;Password=test;Database=yaparr
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -50,6 +67,25 @@ jobs:
           docker compose exec -T cloud dotnet Yaparr.Cloud.dll accounts add ci@example.com --password "a password for the test run" | head -1
           docker compose exec -T cloud dotnet Yaparr.Cloud.dll codes add --uses 1 | head -1
           docker compose exec -T cloud dotnet Yaparr.Cloud.dll accounts list
+      - name: The service comes up healthy on Postgres, and the admin commands work there
+        env:
+          COMPOSE_PROFILES: postgres
+          POSTGRES_PASSWORD: ci-only-password
+          SERVICE_DATABASE: Host=postgres;Database=yaparr;Username=yaparr;Password=ci-only-password
+        run: |
+          docker compose down -v
+          docker compose up -d --build
+          for i in $(seq 1 40); do
+            state=$(docker inspect --format '{{.State.Health.Status}}' "$(docker compose ps -q cloud)")
+            [ "$state" = healthy ] && break
+            sleep 3
+          done
+          echo "health: $state"
+          [ "$state" = healthy ]
+          docker compose exec -T cloud dotnet Yaparr.Cloud.dll accounts add ci@example.com --password "a password for the test run" | head -1
+          docker compose exec -T cloud dotnet Yaparr.Cloud.dll codes add --uses 1 | head -1
+          docker compose exec -T cloud dotnet Yaparr.Cloud.dll accounts list
+          docker compose exec -T postgres psql -U yaparr -d yaparr -tAc "select count(*) from accounts" | grep -qx 1
       - name: What the service said
         if: always()
         run: docker compose logs cloud | tail -30

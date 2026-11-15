@@ -106,7 +106,12 @@ Set `BehindProxy` to `true` only when a reverse proxy is in front (it should be,
 
 ### Storage
 
-Files, one folder per account (the hex SHA-256 of its email address) with numbered versions, written to a temporary file and moved into place. `BackupStore` is the only thing that touches them, so S3 or similar can replace it later. `accounts.json` beside them holds the email addresses, password hashes, token hashes and passes, and `codes.json` the signup codes (as hashes) and who used them.
+Files, one folder per account (the hex SHA-256 of its email address) with numbered versions, written to a temporary file and moved into place. `BackupStore` is the only thing that touches them, so S3 or similar can replace it later. They are not put in the database: they are large, already encrypted (so a database could neither compress nor search them), and would be copied into every database backup.
+
+Accounts (email addresses, password hashes, token hashes, passes, the admin flag and authenticator secret) and signup codes (as hashes, with who used them) are kept one of two ways, behind `IAccounts` and `ISignupCodes`:
+
+- **Files** (the default): `accounts.json` and `codes.json` beside the backups. One service instance only, since each keeps its own copy in memory.
+- **Postgres**: when `Service__Database` is a connection string. The schema is made and updated when the service starts (`PostgresDatabase.Migrate`; a database from a newer version is refused, not damaged), and the first start on an empty database copies the two files in, in one transaction, then renames them `.imported`. See [docs/setup-guide.md](docs/setup-guide.md), "Moving to Postgres". The same tests run against both (`StoreContractTests`); the Postgres ones run when `YAPARR_TEST_POSTGRES` is a connection string (CI has one), and are skipped otherwise.
 
 **Which versions are kept.** A backup is saved when something that cannot be lost changes (a room, a key, a linked device) and once a day for the history, so saving often must not push the older, known-good copies out: a bad save would then replace every good one. After each save the server keeps the newest `KeepVersions` (3), and the newest version of each of the last `KeepDays` (7) UTC days, counting today, and removes the rest (`Retention`). So an account holds at most ten versions: the latest few, and one from each morning of the week. The newest is never removed. (Before this, the newest five were kept whatever their age.)
 

@@ -248,7 +248,7 @@ public sealed class AdminPortalTests : ServiceTest
         var (_, _, html) = await Open(admin);
 
         Assert.Contains("friend@example.com", html);
-        Assert.Contains("(admin)", html);
+        Assert.Contains("pill admin", html);
         Assert.Contains(info.Id, html);
         Assert.Contains("&lt;script&gt;alert(1)&lt;/script&gt;", html);       // encoded, not run
         Assert.DoesNotContain("<script>alert", html);
@@ -339,7 +339,7 @@ public sealed class AdminPortalTests : ServiceTest
         var response = await Form(admin.Client, "/admin/accounts/add", new() { ["csrf"] = csrf, ["email"] = " New@Example.com " }, cookie);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var html = await response.Content.ReadAsStringAsync();
-        var password = Regex.Match(html, "<code>([^<]+)</code>").Groups[1].Value;
+        var password = Regex.Match(html, "<code class=\"secret\">([^<]+)</code>").Groups[1].Value;
         Assert.True(password.Length >= Passwords.MinLength);
         Assert.True(new AccountDirectory(Options).CheckPassword("new@example.com", password));
 
@@ -360,7 +360,7 @@ public sealed class AdminPortalTests : ServiceTest
         var (cookie, csrf, _) = await Open(admin);
         var response = await Form(admin.Client, "/admin/accounts/password", new() { ["csrf"] = csrf, ["name"] = "friend@example.com" }, cookie);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var password = Regex.Match(await response.Content.ReadAsStringAsync(), "<code>([^<]+)</code>").Groups[1].Value;
+        var password = Regex.Match(await response.Content.ReadAsStringAsync(), "<code class=\"secret\">([^<]+)</code>").Groups[1].Value;
 
         var accounts = new AccountDirectory(Options);
         Assert.True(accounts.CheckPassword("friend@example.com", password));

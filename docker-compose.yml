@@ -10,6 +10,9 @@
 
 services:
   cloud:
+    # The image CI publishes for each commit of master (deploy.sh sets IMAGE_TAG to the commit). "build" is the fallback: with --build, or when there is no
+    # such image (a branch, or a machine that cannot reach ghcr.io), the image is built here and given this same name.
+    image: ghcr.io/zburtle/yaparr-cloud:${IMAGE_TAG:-latest}
     build: .
     restart: unless-stopped
     environment:

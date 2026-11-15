@@ -56,12 +56,39 @@ jobs:
       - if: always()
         run: docker compose down -v
 
+  # After a merge to master, and only if both of the above passed: publishes the image to ghcr.io (public, like this repository), so a machine can pull
+  # it instead of building it. Tagged with the commit (what deploy.sh pulls) and as latest. This is the only job that may write packages.
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: [test, docker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/zburtle/yaparr-cloud:sha-${{ github.sha }}
+            ghcr.io/zburtle/yaparr-cloud:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   # After a merge to master, and only if both of the above passed: deploys it on the droplet over SSH (deploy.sh, which goes back by itself if the
   # new version is not healthy). The key can run that script and nothing else. A manual run of this workflow does not deploy. Until the three secrets
   # are set (docs/setup-guide.md, "Automatic deploys") it says so and does nothing, and the droplet is updated by hand with ./deploy.sh deploy.
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    needs: [test, docker]
+    needs: [test, docker, publish]
     runs-on: ubuntu-latest
     concurrency:
       group: deploy

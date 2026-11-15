@@ -20,7 +20,7 @@ Do them in this order: the server, then the website, then the app. Each step say
 ## 2. The droplet
 
 1. In DigitalOcean choose **Create > Droplets**.
-   - **Image:** Ubuntu 24.04 (LTS).
+   - **Image:** Debian 13 (`debian-13-x64`).
    - **Size:** Basic with **1 GB of memory** is enough (check the monthly price on DigitalOcean). The machine only pulls the published image and never builds one, so it needs no swap. Backups are small, so the disk size matters little at first.
    - **Region:** near most of your friends.
    - **Authentication:** an SSH key, not a password.
@@ -54,6 +54,7 @@ ssh root@<droplet ip>
 adduser deploy
 usermod -aG sudo deploy
 apt update && apt -y upgrade
+apt -y install sudo ufw
 curl -fsSL https://get.docker.com | sh
 usermod -aG docker deploy
 reboot

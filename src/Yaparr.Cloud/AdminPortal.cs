@@ -22,14 +22,14 @@ public static class AdminPortal
         var log = app.Logger;
         var admin = app.MapGroup("/admin");
         admin.AddEndpointFilter(async (context, next) =>
-            context.HttpContext.RequestServices.GetRequiredService<AccountDirectory>().AnyAdmin() ? await next(context) : Results.NotFound());
+            context.HttpContext.RequestServices.GetRequiredService<IAccounts>().AnyAdmin() ? await next(context) : Results.NotFound());
 
         // ---- signing in ----
 
-        admin.MapGet("/login", (HttpContext http, AccountDirectory accounts, AdminSessions sessions) =>
+        admin.MapGet("/login", (HttpContext http, IAccounts accounts, AdminSessions sessions) =>
             Current(http, accounts, sessions) != null ? Results.Redirect("/admin") : Html(http, AdminPages.Login("", null)));
 
-        admin.MapPost("/login", async (HttpContext http, AccountDirectory accounts, AdminSessions sessions, LoginLimiter limiter) =>
+        admin.MapPost("/login", async (HttpContext http, IAccounts accounts, AdminSessions sessions, LoginLimiter limiter) =>
         {
             var form = await http.Request.ReadFormAsync();
             string typed = form["username"].ToString(), password = form["password"].ToString(), code = form["code"].ToString();
@@ -67,7 +67,7 @@ public static class AdminPortal
             return Results.Redirect("/admin");
         }).DisableAntiforgery();
 
-        admin.MapPost("/logout", (HttpContext http, AccountDirectory accounts, AdminSessions sessions) => Post(http, accounts, sessions, (session, _) =>
+        admin.MapPost("/logout", (HttpContext http, IAccounts accounts, AdminSessions sessions) => Post(http, accounts, sessions, (session, _) =>
         {
             sessions.End(http.Request.Cookies[CookieName]);
             http.Response.Cookies.Delete(CookieName, new CookieOptions { Path = "/admin" });
@@ -76,14 +76,14 @@ public static class AdminPortal
 
         // ---- the overview ----
 
-        admin.MapGet("", (HttpContext http, AccountDirectory accounts, AdminSessions sessions, BackupStore store, SignupCodes codes) =>
+        admin.MapGet("", (HttpContext http, IAccounts accounts, AdminSessions sessions, BackupStore store, ISignupCodes codes) =>
             Current(http, accounts, sessions) is { } session
                 ? Html(http, Dashboard(session, options, accounts, store, codes))
                 : Results.Redirect("/admin/login"));
 
         // ---- accounts ----
 
-        admin.MapPost("/accounts/add", (HttpContext http, AccountDirectory accounts, AdminSessions sessions) => Post(http, accounts, sessions, async (session, form) =>
+        admin.MapPost("/accounts/add", (HttpContext http, IAccounts accounts, AdminSessions sessions) => Post(http, accounts, sessions, async (session, form) =>
         {
             if (AccountDirectory.Normalize(form["email"].ToString()) is not { } email)
                 return Html(http, AdminPages.Result("That email address does not look right", "Go back and check it."), StatusCodes.Status400BadRequest);
@@ -94,7 +94,7 @@ public static class AdminPortal
             return Html(http, AdminPages.Secret($"Made the account {email}", "Its password is below. It is not kept anywhere, so this is the only time it is shown. Give it to them; they can change it on the sign-in page.", password));
         })).DisableAntiforgery();
 
-        admin.MapPost("/accounts/password", (HttpContext http, AccountDirectory accounts, AdminSessions sessions) => Post(http, accounts, sessions, async (session, form) =>
+        admin.MapPost("/accounts/password", (HttpContext http, IAccounts accounts, AdminSessions sessions) => Post(http, accounts, sessions, async (session, form) =>
         {
             if (AccountDirectory.Normalize(form["name"].ToString()) is not { } name || !accounts.Exists(name))
                 return Html(http, AdminPages.Result("There is no such account", "It may have been removed."), StatusCodes.Status404NotFound);
@@ -105,13 +105,13 @@ public static class AdminPortal
             return Html(http, AdminPages.Secret($"New password for {name}", "Their devices were signed out and their backups are untouched. The password is not kept anywhere, so this is the only time it is shown.", password));
         })).DisableAntiforgery();
 
-        admin.MapGet("/accounts/remove", (HttpContext http, AccountDirectory accounts, AdminSessions sessions, string? name) =>
+        admin.MapGet("/accounts/remove", (HttpContext http, IAccounts accounts, AdminSessions sessions, string? name) =>
             Current(http, accounts, sessions) is not { } session ? Results.Redirect("/admin/login")
             : AccountDirectory.Normalize(name) is { } who && accounts.Exists(who)
                 ? Html(http, AdminPages.ConfirmRemove(session, who, accounts.IsAdmin(who)))
                 : Html(http, AdminPages.Result("There is no such account", "It may have been removed."), StatusCodes.Status404NotFound));
 
-        admin.MapPost("/accounts/remove", (HttpContext http, AccountDirectory accounts, AdminSessions sessions, BackupStore store) => Post(http, accounts, sessions, async (session, form) =>
+        admin.MapPost("/accounts/remove", (HttpContext http, IAccounts accounts, AdminSessions sessions, BackupStore store) => Post(http, accounts, sessions, async (session, form) =>
         {
             if (AccountDirectory.Normalize(form["name"].ToString()) is not { } name || !accounts.Exists(name))
                 return Html(http, AdminPages.Result("There is no such account", "It may have been removed."), StatusCodes.Status404NotFound);
@@ -127,7 +127,7 @@ public static class AdminPortal
 
         // ---- signup codes ----
 
-        admin.MapPost("/codes/add", (HttpContext http, AccountDirectory accounts, AdminSessions sessions, SignupCodes codes) => Post(http, accounts, sessions, (session, form) =>
+        admin.MapPost("/codes/add", (HttpContext http, IAccounts accounts, AdminSessions sessions, ISignupCodes codes) => Post(http, accounts, sessions, (session, form) =>
         {
             if (!TryWhole(form["uses"].ToString(), 100_000, out var uses))
                 return Task.FromResult(Html(http, AdminPages.Result("How many people?", "Leave it empty for no limit, or give a whole number from 1 to 100000."), StatusCodes.Status400BadRequest));
@@ -145,7 +145,7 @@ public static class AdminPortal
                 (days is { } left ? $", for {left} day{(left == 1 ? "" : "s")}" : "") + ". The code is not kept anywhere, so this is the only time the link is shown.", link)));
         })).DisableAntiforgery();
 
-        admin.MapPost("/codes/revoke", (HttpContext http, AccountDirectory accounts, AdminSessions sessions, SignupCodes codes) => Post(http, accounts, sessions, (session, form) =>
+        admin.MapPost("/codes/revoke", (HttpContext http, IAccounts accounts, AdminSessions sessions, ISignupCodes codes) => Post(http, accounts, sessions, (session, form) =>
         {
             var id = form["id"].ToString();
             if (!codes.Revoke(id)) return Task.FromResult(Html(http, AdminPages.Result("There is no such code", "It may have been revoked already."), StatusCodes.Status404NotFound));
@@ -153,13 +153,13 @@ public static class AdminPortal
             return Task.FromResult(Results.Redirect("/admin"));
         })).DisableAntiforgery();
 
-        admin.MapGet("/codes/delete", (HttpContext http, AccountDirectory accounts, AdminSessions sessions, SignupCodes codes, string? id) =>
+        admin.MapGet("/codes/delete", (HttpContext http, IAccounts accounts, AdminSessions sessions, ISignupCodes codes, string? id) =>
             Current(http, accounts, sessions) is not { } session ? Results.Redirect("/admin/login")
             : codes.List().FirstOrDefault(c => c.Id == (id ?? "").Trim().ToLowerInvariant()) is { } code
                 ? Html(http, AdminPages.ConfirmDeleteCode(session, code, DateTimeOffset.UtcNow))
                 : Html(http, AdminPages.Result("There is no such code", "It may have been deleted already."), StatusCodes.Status404NotFound));
 
-        admin.MapPost("/codes/delete", (HttpContext http, AccountDirectory accounts, AdminSessions sessions, SignupCodes codes) => Post(http, accounts, sessions, (session, form) =>
+        admin.MapPost("/codes/delete", (HttpContext http, IAccounts accounts, AdminSessions sessions, ISignupCodes codes) => Post(http, accounts, sessions, (session, form) =>
         {
             var id = form["id"].ToString();
             if (!codes.Delete(id)) return Task.FromResult(Html(http, AdminPages.Result("There is no such code", "It may have been deleted already."), StatusCodes.Status404NotFound));
@@ -182,7 +182,7 @@ public static class AdminPortal
     }
 
     /// <summary>The signed-in admin of this request, or null: no cookie, a session that has ended, or an account that is no longer an admin.</summary>
-    private static AdminSession? Current(HttpContext http, AccountDirectory accounts, AdminSessions sessions)
+    private static AdminSession? Current(HttpContext http, IAccounts accounts, AdminSessions sessions)
     {
         var cookie = http.Request.Cookies[CookieName];
         if (sessions.Get(cookie) is not { } session) return null;
@@ -192,7 +192,7 @@ public static class AdminPortal
     }
 
     /// <summary>A form post of a signed-in admin that carries the token of its session; anything else is not done.</summary>
-    private static async Task<IResult> Post(HttpContext http, AccountDirectory accounts, AdminSessions sessions, Func<AdminSession, IFormCollection, Task<IResult>> action)
+    private static async Task<IResult> Post(HttpContext http, IAccounts accounts, AdminSessions sessions, Func<AdminSession, IFormCollection, Task<IResult>> action)
     {
         if (Current(http, accounts, sessions) is not { } session) return Results.Redirect("/admin/login");
         var form = await http.Request.ReadFormAsync();
@@ -202,7 +202,7 @@ public static class AdminPortal
         return await action(session, form);
     }
 
-    private static string Dashboard(AdminSession session, ServiceOptions options, AccountDirectory accounts, BackupStore store, SignupCodes codes)
+    private static string Dashboard(AdminSession session, ServiceOptions options, IAccounts accounts, BackupStore store, ISignupCodes codes)
     {
         var rows = accounts.List().Select(a =>
         {

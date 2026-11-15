@@ -20,12 +20,19 @@ services:
       # Service__PublicUrl: "https://cloud.yaparr.com"      # this service's address, for the signup links from "codes add" (this is the default in appsettings.json)
       # Service__SignupPageUrl: "https://yaparr.com/signup"  # the website page the links open (this is the default)
       # Service__MaxBlobBytes: "536870912"   # the largest backup, in bytes (512 MiB); Caddy allows a little more than this
+      # Where accounts and signup codes are kept: empty is files in /data (as before); set SERVICE_DATABASE in .env, with COMPOSE_PROFILES=postgres, to use the
+      # postgres container below (docs/setup-guide.md, "Moving to Postgres"). Backups are files either way.
+      Service__Database: "${SERVICE_DATABASE:-}"
       # Service__KeepVersions: "3"      # the newest versions always kept ...
       # Service__KeepDays: "7"          # ... and the newest of each of this many days
       # Service__WritesPerHour: "12"
       # Service__RequestsPerMinute: "120"
     volumes:
       - cloud-data:/data                     # the accounts, the signup codes and every backup: this is what to back up
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false                      # only when the postgres profile is on
     expose:
       - "8080"
     # Also on this computer only (127.0.0.1), for a proxy of your own or for looking at it from the machine itself. 0.0.0.0 would reach it from other
@@ -38,6 +45,27 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  # Accounts and signup codes, when SERVICE_DATABASE is set (and COMPOSE_PROFILES=postgres starts it). Small on purpose: it has to share a 1 GB machine with the rest.
+  postgres:
+    profiles: ["postgres"]
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: yaparr
+      POSTGRES_USER: yaparr
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}                # required when the profile is on: the container will not start without it
+    command: ["postgres", "-c", "shared_buffers=32MB", "-c", "max_connections=20", "-c", "work_mem=2MB", "-c", "maintenance_work_mem=16MB", "-c", "effective_cache_size=128MB"]
+    mem_limit: 256m
+    volumes:
+      - pg-data:/var/lib/postgresql/data     # the accounts and codes: back this up too (pg_dump, see docs/setup-guide.md)
+    expose:
+      - "5432"                               # reachable by the service only: no port is published
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yaparr -d yaparr"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
 
   caddy:
     image: caddy:2
@@ -57,6 +85,7 @@ services:
       - caddy-config:/config
 
 volumes:
+  pg-data:
   cloud-data:
   caddy-data:
   caddy-config:

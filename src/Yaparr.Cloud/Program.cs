@@ -19,8 +19,8 @@ var builder = WebApplication.CreateBuilder(args);
 var options = builder.Configuration.GetSection("Service").Get<ServiceOptions>() ?? new ServiceOptions();
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton<BackupStore>();
-builder.Services.AddSingleton<AccountDirectory>();
-builder.Services.AddSingleton<SignupCodes>();
+builder.Services.AddSingleton<IAccounts>(_ => Stores.Accounts(options));
+builder.Services.AddSingleton<ISignupCodes>(_ => Stores.Codes(options));
 builder.Services.AddSingleton<WriteLimiter>();
 builder.Services.AddSingleton<LoginFlow>();
 builder.Services.AddSingleton<SignInHandoff>();
@@ -63,7 +63,7 @@ app.MapGet("/login", (HttpContext http, string? redirect_uri, string? code_chall
         ? Html(http, Pages.Login(request, "", null))
         : Html(http, Pages.Message("This link does not work", problem), StatusCodes.Status400BadRequest));
 
-app.MapPost("/login", async (HttpContext http, AccountDirectory accounts, LoginFlow flow, LoginLimiter limiter) =>
+app.MapPost("/login", async (HttpContext http, IAccounts accounts, LoginFlow flow, LoginLimiter limiter) =>
 {
     var form = await http.Request.ReadFormAsync();
     if (LoginFlow.Read(form["redirect_uri"], form["code_challenge"], form["state"], form["device"], out var problem) is not { } request)
@@ -87,7 +87,7 @@ app.MapPost("/login", async (HttpContext http, AccountDirectory accounts, LoginF
 }).DisableAntiforgery();
 
 // The app trades the code the browser brought back, and the verifier only it knows, for a token.
-app.MapPost("/v1/token", async (HttpContext http, AccountDirectory accounts, LoginFlow flow) =>
+app.MapPost("/v1/token", async (HttpContext http, IAccounts accounts, LoginFlow flow) =>
 {
     TokenRequest? body;
     try { body = await http.Request.ReadFromJsonAsync<TokenRequest>(); }
@@ -98,7 +98,7 @@ app.MapPost("/v1/token", async (HttpContext http, AccountDirectory accounts, Log
 });
 
 // The app opened from the "You're in" page trades the code in its button for a token (see SignInHandoff).
-app.MapPost("/v1/token/handoff", async (HttpContext http, AccountDirectory accounts, SignInHandoff handoff) =>
+app.MapPost("/v1/token/handoff", async (HttpContext http, IAccounts accounts, SignInHandoff handoff) =>
 {
     HandoffRequest? body;
     try { body = await http.Request.ReadFromJsonAsync<HandoffRequest>(); }
@@ -109,12 +109,12 @@ app.MapPost("/v1/token/handoff", async (HttpContext http, AccountDirectory accou
 });
 
 // Signing a device out.
-app.MapDelete("/v1/token", (HttpContext http, AccountDirectory accounts) =>
+app.MapDelete("/v1/token", (HttpContext http, IAccounts accounts) =>
     BearerOf(http) is { } token && accounts.RevokeToken(token) ? Results.NoContent() : Problem(StatusCodes.Status401Unauthorized, NotSignedIn));
 
 app.MapGet("/account/password", (HttpContext http) => Html(http, Pages.ChangePassword("", null)));
 
-app.MapPost("/account/password", async (HttpContext http, AccountDirectory accounts, LoginLimiter limiter) =>
+app.MapPost("/account/password", async (HttpContext http, IAccounts accounts, LoginLimiter limiter) =>
 {
     var form = await http.Request.ReadFormAsync();
     var typed = form["username"].ToString();
@@ -140,7 +140,7 @@ app.MapPost("/account/password", async (HttpContext http, AccountDirectory accou
 
 // The website's page collects an email address and the code from the link and posts them here, so the code goes to this server and not to the
 // website, and the password is chosen on this server's own page below and never passes through the website.
-app.MapPost("/signup", async (HttpContext http, AccountDirectory accounts, SignupCodes codes, LoginLimiter limiter) =>
+app.MapPost("/signup", async (HttpContext http, IAccounts accounts, ISignupCodes codes, LoginLimiter limiter) =>
 {
     var form = await http.Request.ReadFormAsync();
     var who = "ip:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown");
@@ -167,7 +167,7 @@ app.MapPost("/signup", async (HttpContext http, AccountDirectory accounts, Signu
     return Html(http, Pages.SetPassword(token, email, null));
 }).DisableAntiforgery();
 
-app.MapPost("/account/setup", async (HttpContext http, AccountDirectory accounts, SignInHandoff handoff) =>
+app.MapPost("/account/setup", async (HttpContext http, IAccounts accounts, SignInHandoff handoff) =>
 {
     var form = await http.Request.ReadFormAsync();
     var token = form["token"].ToString();
@@ -196,7 +196,7 @@ app.MapAdminPortal(options);
 
 var backup = app.MapGroup("/v1/backup");
 
-backup.MapPut("", async (HttpContext http, BackupStore store, WriteLimiter writes, AccountDirectory accounts, CancellationToken cancel) =>
+backup.MapPut("", async (HttpContext http, BackupStore store, WriteLimiter writes, IAccounts accounts, CancellationToken cancel) =>
 {
     if (accounts.UserOfToken(BearerOf(http)) is not { } user) return Problem(StatusCodes.Status401Unauthorized, NotSignedIn);
 
@@ -219,7 +219,7 @@ backup.MapPut("", async (HttpContext http, BackupStore store, WriteLimiter write
     };
 });
 
-backup.MapGet("", (HttpContext http, BackupStore store, AccountDirectory accounts, int? version) =>
+backup.MapGet("", (HttpContext http, BackupStore store, IAccounts accounts, int? version) =>
 {
     if (accounts.UserOfToken(BearerOf(http)) is not { } user) return Problem(StatusCodes.Status401Unauthorized, NotSignedIn);
     var found = store.Open(BackupStore.FolderOf(user), version);
@@ -228,12 +228,12 @@ backup.MapGet("", (HttpContext http, BackupStore store, AccountDirectory account
     return Results.Stream(found.Value.Content, "application/octet-stream");
 });
 
-backup.MapGet("/versions", (HttpContext http, BackupStore store, AccountDirectory accounts) =>
+backup.MapGet("/versions", (HttpContext http, BackupStore store, IAccounts accounts) =>
     accounts.UserOfToken(BearerOf(http)) is { } user
         ? Results.Json(new { username = user, versions = store.Versions(BackupStore.FolderOf(user)).Select(v => new { version = v.Version, size = v.Size, at = v.At }) })
         : Problem(StatusCodes.Status401Unauthorized, NotSignedIn));
 
-backup.MapDelete("", async (HttpContext http, BackupStore store, AccountDirectory accounts, CancellationToken cancel) =>
+backup.MapDelete("", async (HttpContext http, BackupStore store, IAccounts accounts, CancellationToken cancel) =>
 {
     if (accounts.UserOfToken(BearerOf(http)) is not { } user) return Problem(StatusCodes.Status401Unauthorized, NotSignedIn);
     return await store.DeleteAsync(BackupStore.FolderOf(user), cancel) ? Results.NoContent() : Problem(StatusCodes.Status404NotFound, "There is no backup.");

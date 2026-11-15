@@ -98,7 +98,9 @@ public sealed class AdminPortalTests : ServiceTest
 
     private sealed record Admin(HttpClient Client, string Secret, string Account)
     {
-        private int _next = -1;   // the step before the current one, then this one, then the next: each is accepted, each once
+        // This step, then the next: both are accepted, each once. (Not the step before: if the clock moves into the next step between making a code and
+        // the service checking it, that one is two steps back and refused.)
+        private int _next;
 
         public string NextCode() => Totp.Code(Secret, Totp.StepOf(DateTimeOffset.UtcNow) + _next++);
     }

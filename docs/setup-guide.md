@@ -15,13 +15,13 @@ Do them in this order: the server, then the website, then the app. Each step say
 - A DigitalOcean account.
 - Control of the DNS for `yaparr.com` (wherever it is managed: the registrar, DigitalOcean, Cloudflare).
 - Access to the three GitHub repositories.
-- About an hour, most of it waiting for the first build.
+- About an hour, most of it waiting for DNS and the first certificate.
 
 ## 2. The droplet
 
 1. In DigitalOcean choose **Create > Droplets**.
    - **Image:** Ubuntu 24.04 (LTS).
-   - **Size:** Basic with **2 GB of memory** is comfortable (about $12 a month at the time of writing; check the price). 1 GB runs the server, but building the image can run out of memory on it, so if you choose 1 GB, add swap first (`sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile`). Backups are small, so the disk size matters little at first.
+   - **Size:** Basic with **1 GB of memory** is enough (check the monthly price on DigitalOcean). The machine only pulls the published image and never builds one, so it needs no swap. Backups are small, so the disk size matters little at first.
    - **Region:** near most of your friends.
    - **Authentication:** an SSH key, not a password.
    - Turn on **Backups** (weekly snapshots, a fifth more on the price). They are your safety net if the machine is lost.
@@ -98,10 +98,10 @@ cd Yaparr.Cloud
 ## 6. Start it
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
 
-The first build takes several minutes. Then:
+This pulls the published image (`ghcr.io/zburtle/yaparr-cloud:latest`) and starts it; Then:
 
 ```bash
 docker compose ps                  # both "cloud" (healthy) and "caddy" are running
@@ -156,7 +156,7 @@ Merge the app's pull request. The app is released with `yaparr.release.json` bes
 
 ## 10b. The published image
 
-After a merge to `master`, CI builds the image and publishes it to `ghcr.io/zburtle/yaparr-cloud`, tagged `sha-<commit>` and `latest`. `deploy.sh` pulls the one for the commit it checked out, so the droplet no longer builds anything (and needs no spare memory or disk for it). If there is no such image (a branch, or `ghcr.io` cannot be reached) it builds the image itself, as before. Anyone can run the service without cloning this repository: `docker run -p 8080:8080 -v cloud-data:/data ghcr.io/zburtle/yaparr-cloud:latest`.
+After a merge to `master`, CI builds the image and publishes it to `ghcr.io/zburtle/yaparr-cloud`, tagged `sha-<commit>` and `latest`. `deploy.sh` pulls the one for the commit it checked out, so the droplet no longer builds anything (and needs no spare memory or disk for it). If there is no such image (a branch, or `ghcr.io` cannot be reached) it builds the image itself, which needs more memory and disk than the droplet has spare, so the fallback is only for when there is no published image. Anyone can run the service without cloning this repository: `docker run -p 8080:8080 -v cloud-data:/data ghcr.io/zburtle/yaparr-cloud:latest`.
 
 The first time the image is published GitHub makes the package. Open it (the repository's **Packages** section) and check its settings say Public. The package is tied to this repository by a label in the Dockerfile, which normally gives it the repository's visibility; if it is private, set it public by hand once (the API cannot do that).
 
@@ -207,7 +207,7 @@ Resetting a password loses nothing: backups are locked with each person's recove
 
 ## 12. Costs and care
 
-- The droplet is the only cost: roughly $12 a month, plus about 20% for backups.
+- The droplet is the only cost: its monthly price (1 GB is the size this guide needs), plus about 20% for backups.
 - Keep the system updated (`sudo apt update && sudo apt upgrade`, and the `git pull` update above).
 - Watch the disk (`df -h`): each person's backups keep the last five versions. `accounts list` shows who uses what.
 - SSH takes keys only (the droplet's default), and `ufw limit` slows anyone who keeps trying. If your own address is steady, `ufw allow from <your address> to any port 22` and removing the general rule (`ufw delete limit 22/tcp`) is stricter, but you can lock yourself out if your address changes; the DigitalOcean web console is the way back in.

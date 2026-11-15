@@ -152,6 +152,20 @@ public static class AdminPortal
             log.LogInformation("Admin {Admin} revoked the signup code {Code}", session.User, id);
             return Task.FromResult(Results.Redirect("/admin"));
         })).DisableAntiforgery();
+
+        admin.MapGet("/codes/delete", (HttpContext http, AccountDirectory accounts, AdminSessions sessions, SignupCodes codes, string? id) =>
+            Current(http, accounts, sessions) is not { } session ? Results.Redirect("/admin/login")
+            : codes.List().FirstOrDefault(c => c.Id == (id ?? "").Trim().ToLowerInvariant()) is { } code
+                ? Html(http, AdminPages.ConfirmDeleteCode(session, code, DateTimeOffset.UtcNow))
+                : Html(http, AdminPages.Result("There is no such code", "It may have been deleted already."), StatusCodes.Status404NotFound));
+
+        admin.MapPost("/codes/delete", (HttpContext http, AccountDirectory accounts, AdminSessions sessions, SignupCodes codes) => Post(http, accounts, sessions, (session, form) =>
+        {
+            var id = form["id"].ToString();
+            if (!codes.Delete(id)) return Task.FromResult(Html(http, AdminPages.Result("There is no such code", "It may have been deleted already."), StatusCodes.Status404NotFound));
+            log.LogInformation("Admin {Admin} deleted the signup code {Code}", session.User, id);
+            return Task.FromResult(Results.Redirect("/admin"));
+        })).DisableAntiforgery();
     }
 
     private static IResult Html(HttpContext http, string page, int status = StatusCodes.Status200OK) => Responses.Html(http, page, status);

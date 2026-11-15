@@ -19,7 +19,8 @@ public static class AdminCommands
         "  codes add [--note <who it is for>] [--uses <how many people>] [--days <how long it works>]\n" +
         "                                  make a signup code and the link to send; one code can be used by many people (any number unless --uses)\n" +
         "  codes list                      the codes, who used each, and whether it still works\n" +
-        "  codes revoke <id>               stop a code working (people who signed up with it keep their accounts)\n";
+        "  codes revoke <id>               stop a code working (people who signed up with it keep their accounts)\n" +
+        "  codes delete <id>               take a code out altogether, with the record of who used it (they keep their accounts)\n";
 
     public static Task<int> RunCodesAsync(string[] args, ServiceOptions options, TextWriter output) => RunCodesAsync(args, options, output, DateTimeOffset.UtcNow);
 
@@ -74,6 +75,13 @@ public static class AdminCommands
                 if (rest.Count == 0) { output.Write(CodesUsage); return Task.FromResult(2); }
                 if (!codes.Revoke(rest[0])) { output.WriteLine("There is no code with that id (codes list shows them)."); return Task.FromResult(1); }
                 output.WriteLine("Revoked. People who already signed up with it keep their accounts.");
+                return Task.FromResult(0);
+            }
+            case "delete":
+            {
+                if (rest.Count == 0) { output.Write(CodesUsage); return Task.FromResult(2); }
+                if (!codes.Delete(rest[0])) { output.WriteLine("There is no code with that id (codes list shows them)."); return Task.FromResult(1); }
+                output.WriteLine("Deleted. People who signed up with it keep their accounts.");
                 return Task.FromResult(0);
             }
             default:

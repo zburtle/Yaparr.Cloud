@@ -351,4 +351,45 @@ public sealed class SignupTests : ServiceTest
         File.WriteAllText(Path.Combine(Dir, "accounts.json"), """{ "users": { "sam@example.com": { "passwordHash": null, "created": "2026-11-10T20:49:55+00:00" } } }""");
         Assert.Equal("lifetime", new AccountDirectory(Options).List().Single().Pass);
     }
+
+    // ---- deleting a code ----
+
+    [Fact]
+    public async Task A_deleted_code_is_gone_with_its_record_and_the_people_who_used_it_keep_their_accounts()
+    {
+        var codes = new SignupCodes(Options);
+        var (code, info) = codes.Create("book club", null, null);
+        var (other, otherInfo) = codes.Create("family", null, null);
+        var client = Start();
+        Assert.Equal(HttpStatusCode.OK, (await SignUp(client, code, "friend@example.com")).StatusCode);
+        var accounts = new AccountDirectory(Options);
+        Assert.True(accounts.Exists("friend@example.com"));
+
+        Assert.True(codes.Delete(info.Id));
+        Assert.DoesNotContain(codes.List(), c => c.Id == info.Id);
+        Assert.Contains(codes.List(), c => c.Id == otherInfo.Id);       // the others are untouched
+        Assert.Null(codes.Check(code));
+        Assert.NotNull(codes.Check(other));
+        var file = File.ReadAllText(Path.Combine(Dir, "codes.json"));
+        Assert.DoesNotContain(info.Id, file);
+        Assert.DoesNotContain("friend@example.com", file);              // who used it is forgotten as well
+        Assert.True(accounts.Exists("friend@example.com"));
+        Assert.Equal(HttpStatusCode.Forbidden, (await SignUp(client, code, "late@example.com")).StatusCode);
+
+        Assert.False(codes.Delete(info.Id));                            // already gone
+        Assert.False(codes.Delete("nothing"));
+        Assert.True(new SignupCodes(Options).List().Count == 1);        // and it stays gone when the file is read again
+    }
+
+    [Fact]
+    public async Task The_command_line_deletes_a_code()
+    {
+        var (code, info) = new SignupCodes(Options).Create("", null, null);
+        var output = new StringWriter();
+        Assert.Equal(0, await AdminCommands.RunCodesAsync(new[] { "delete", info.Id }, Options, output));
+        Assert.Contains("Deleted", output.ToString());
+        Assert.Null(new SignupCodes(Options).Check(code));
+        Assert.Equal(1, await AdminCommands.RunCodesAsync(new[] { "delete", info.Id }, Options, new StringWriter()));
+        Assert.Equal(2, await AdminCommands.RunCodesAsync(new[] { "delete" }, Options, new StringWriter()));
+    }
 }

@@ -173,6 +173,39 @@ public abstract class BackupStoreContractTests : IDisposable
     }
 
     [SkippableFact]
+    public async Task What_every_account_has_stored_comes_in_one_pass()
+    {
+        var now = new DateTimeOffset(2026, 11, 15, 9, 0, 0, TimeSpan.Zero);
+        var store = NewStore(o => { o.KeepVersions = 5; o.KeepDays = 0; }, () => now);
+        Assert.Empty(await store.SummariesAsync());
+        await Save(store, Sam, 0, Locked(1000));
+        await Save(store, Sam, 1, Locked(2500));
+        await Save(store, Kim, 0, Locked(400));
+
+        var all = await store.SummariesAsync();
+        Assert.Equal(2, all.Count);
+        Assert.Equal(2, all[Sam].Versions);
+        Assert.Equal(3500, all[Sam].Bytes);
+        Assert.NotNull(all[Sam].Last);
+        Assert.Equal(1, all[Kim].Versions);
+        Assert.Equal(400, all[Kim].Bytes);
+
+        await store.DeleteAsync(Sam, CancellationToken.None);
+        var left = await store.SummariesAsync();
+        Assert.Equal(new[] { Kim }, left.Keys);
+    }
+
+    [SkippableFact]
+    public async Task The_store_says_where_it_is_and_that_it_answers()
+    {
+        var status = await NewStore().StatusAsync();
+        Assert.True(status.Ok, status.Detail);
+        Assert.NotEmpty(status.Kind);
+        Assert.NotEmpty(status.Where);
+        Assert.NotEmpty(status.Detail);
+    }
+
+    [SkippableFact]
     public async Task Saves_for_different_accounts_at_once_all_succeed()
     {
         var store = NewStore();
@@ -277,6 +310,32 @@ public sealed class S3BackupStoreTests : BackupStoreContractTests
         Assert.Equal(1, results.Count(r => r.Outcome == SaveOutcome.Saved));
         Assert.Equal(5, results.Count(r => r.Outcome == SaveOutcome.Conflict));
         Assert.Single(await one.VersionsAsync(Sam));
+    }
+
+    [SkippableFact]
+    public async Task A_store_that_cannot_be_reached_says_so_quickly_without_showing_its_address_or_keys()
+    {
+        var down = new ServiceOptions
+        {
+            S3Endpoint = "http://127.0.0.1:1/abc123accountid.r2.cloudflarestorage.com", S3Bucket = "yaparr-backups", S3AccessKey = "AKIAEXAMPLEKEY", S3SecretKey = "supersecretvalue", S3Prefix = "backups/",
+        };
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var status = await new S3BackupStore(S3BackupStore.CreateClient(down), down).StatusAsync();
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(10));
+        Assert.False(status.Ok);
+        Assert.Equal("Cloudflare R2", status.Kind);
+        Assert.Equal("bucket yaparr-backups", status.Where);
+        var shown = status.Kind + status.Where + status.Detail;
+        Assert.DoesNotContain("abc123accountid", shown);
+        Assert.DoesNotContain("AKIAEXAMPLEKEY", shown);
+        Assert.DoesNotContain("supersecretvalue", shown);
+    }
+
+    [SkippableFact]
+    public async Task A_store_with_a_prefix_of_its_own_names_it()
+    {
+        var status = await NewStore().StatusAsync();
+        Assert.Contains(_prefix, status.Where);
     }
 
     public override void Dispose()

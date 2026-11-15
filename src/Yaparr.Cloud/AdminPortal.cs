@@ -204,22 +204,41 @@ public static class AdminPortal
 
     private static async Task<string> DashboardAsync(AdminSession session, ServiceOptions options, IAccounts accounts, IBackupStore store, ISignupCodes codes)
     {
-        var rows = new List<AdminPages.AccountRow>();
-        foreach (var a in accounts.List())
-        {
-            var versions = await store.VersionsAsync(BackupStore.FolderOf(a.Name));
-            rows.Add(new AdminPages.AccountRow(a, versions.Count, versions.Sum(v => v.Size), versions.Count == 0 ? null : versions[0].At));
-        }
+        // What is stored comes in one pass, not one request for each account (backups may be in a bucket across the internet); if the store is down the page still
+        // comes, with the problem in the Storage card and the backup columns marked as not available.
+        IReadOnlyDictionary<string, AccountBackups>? summaries = null;
+        try { summaries = await store.SummariesAsync(); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { }
 
+        var rows = accounts.List().Select(a =>
+        {
+            var found = summaries?.GetValueOrDefault(BackupStore.FolderOf(a.Name));
+            return new AdminPages.AccountRow(a, found?.Versions ?? 0, found?.Bytes ?? 0, found?.Last, Known: summaries != null);
+        }).ToList();
+
+        // Where things are kept, and whether they answer, all asked at once.
+        var accountsStatus = accounts.StatusAsync();
+        var backupsStatus = store.StatusAsync();
+        var storage = new List<(string Label, StoreStatus Status)>
+        {
+            ("Accounts and signup codes", await accountsStatus),
+            ("Backups", await backupsStatus),
+        };
+        if (options.Database.Length > 0) storage.Add(("Database dump", DumpStatus.Read(options, DateTimeOffset.UtcNow)));
+
+        // The disk matters when backups are files on it.
         long? free = null, total = null;
-        try
+        if (options.S3Bucket.Length == 0)
         {
-            var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(options.DataDirectory))!);
-            free = drive.AvailableFreeSpace;
-            total = drive.TotalSize;
+            try
+            {
+                var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(options.DataDirectory))!);
+                free = drive.AvailableFreeSpace;
+                total = drive.TotalSize;
+            }
+            catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException) { }
         }
-        catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException) { }
 
-        return AdminPages.Dashboard(session, rows, codes.List(), DateTimeOffset.UtcNow, free, total);
+        return AdminPages.Dashboard(session, rows, codes.List(), DateTimeOffset.UtcNow, free, total, storage);
     }
 }

@@ -36,6 +36,32 @@ public sealed class PostgresAccounts : IAccounts
         return command.ExecuteNonQuery();
     }
 
+    public async Task<StoreStatus> StatusAsync(CancellationToken cancel = default)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+        try
+        {
+            await using var c = await _db.OpenConnectionAsync(timeout.Token).ConfigureAwait(false);
+            await using var command = new NpgsqlCommand("select current_database(), current_setting('server_version'), pg_database_size(current_database()), (select count(*) from accounts)", c);
+            await using var reader = await command.ExecuteReaderAsync(timeout.Token).ConfigureAwait(false);
+            await reader.ReadAsync(timeout.Token).ConfigureAwait(false);
+            var bytes = reader.GetInt64(2);
+            return new StoreStatus("PostgreSQL", "database " + reader.GetString(0), true,
+                $"version {reader.GetString(1)} · {(bytes / 1024.0 / 1024.0).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)} MiB · {reader.GetInt64(3)} account{(reader.GetInt64(3) == 1 ? "" : "s")}");
+        }
+        catch (Exception ex) when (ex is NpgsqlException or OperationCanceledException or InvalidOperationException or System.IO.IOException)
+        {
+            return new StoreStatus("PostgreSQL", "the database", false, ex is OperationCanceledException ? "did not answer in 5 seconds" : FirstLine(ex.Message));
+        }
+    }
+
+    private static string FirstLine(string message)
+    {
+        var line = message.Split('\n')[0].Trim();
+        return line.Length > 160 ? line[..160] + "…" : line;
+    }
+
     public bool Exists(string name) => Scalar<int?>("select 1 from accounts where name = @n", ("n", name)) != null;
 
     public bool HasPassword(string name) => Scalar<bool?>("select password_hash is not null from accounts where name = @n", ("n", name)) == true;

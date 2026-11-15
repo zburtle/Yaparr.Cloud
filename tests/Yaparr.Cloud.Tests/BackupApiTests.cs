@@ -17,12 +17,13 @@ public abstract class ServiceTest : IDisposable
 
     protected ServiceOptions Options => new() { DataDirectory = Dir };
 
-    protected HttpClient Start(Dictionary<string, string>? settings = null)
+    protected HttpClient Start(Dictionary<string, string>? settings = null, Action<Microsoft.Extensions.DependencyInjection.IServiceCollection>? services = null)
     {
         var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
         {
             b.UseSetting("Service:DataDirectory", Dir);
             foreach (var (key, value) in settings ?? new()) b.UseSetting("Service:" + key, value);
+            if (services != null) b.ConfigureServices(services);   // what a test puts in place of a part of the service
         });
         _factories.Add(factory);
         // A browser is sent from page to page; the tests look at each step, so they do not follow. Cookies are sent by hand, so a test says when one is.

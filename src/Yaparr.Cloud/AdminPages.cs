@@ -9,7 +9,8 @@ namespace Yaparr.Cloud;
 /// </summary>
 internal static class AdminPages
 {
-    public sealed record AccountRow(AccountEntry Account, int Versions, long Bytes, DateTimeOffset? Last);
+    /// <param name="Known">What is stored for the account could be read (it could not when the store of backups was down).</param>
+    public sealed record AccountRow(AccountEntry Account, int Versions, long Bytes, DateTimeOffset? Last, bool Known = true);
 
     private static string E(string? text) => Pages.E(text);
 
@@ -243,7 +244,8 @@ internal static class AdminPages
         _ => "<span class=\"pill warn\">Used up</span>",
     };
 
-    public static string Dashboard(AdminSession session, IReadOnlyList<AccountRow> rows, IReadOnlyList<SignupCodeInfo> codes, DateTimeOffset now, long? diskFree, long? diskTotal)
+    public static string Dashboard(AdminSession session, IReadOnlyList<AccountRow> rows, IReadOnlyList<SignupCodeInfo> codes, DateTimeOffset now, long? diskFree, long? diskTotal,
+        IReadOnlyList<(string Label, StoreStatus Status)>? storage = null)
     {
         var token = Token(session.Csrf);
 
@@ -252,7 +254,8 @@ internal static class AdminPages
         {
             var a = row.Account;
             var state = a.HasPassword ? Plural(a.Devices, "device") + " signed in" : a.SignupCode != null ? "Signed up, no password yet" : "No password";
-            var backup = row.Versions == 0 ? "<span class=\"muted\">No backup</span>"
+            var backup = !row.Known ? "<span class=\"muted\">Not available</span>"
+                : row.Versions == 0 ? "<span class=\"muted\">No backup</span>"
                 : $"{Mib(row.Bytes)} <span class=\"muted\">· {Plural(row.Versions, "version")}, {row.Last:yyyy-MM-dd HH:mm}</span>";
             accountRows.Append($"""
                 <tr>
@@ -287,6 +290,17 @@ internal static class AdminPages
 
         var devices = rows.Sum(r => r.Account.Devices);
         var bytes = rows.Sum(r => r.Bytes);
+        var backupsKnown = rows.All(r => r.Known);
+
+        var storageRows = new StringBuilder();
+        foreach (var (label, status) in storage ?? Array.Empty<(string, StoreStatus)>())
+            storageRows.Append($"""
+                <tr>
+                <td><span class="name">{E(label)}</span></td>
+                <td>{E(status.Kind)} <span class="muted">· {E(status.Where)}</span></td>
+                <td>{(status.Ok ? "<span class=\"pill ok\">OK</span>" : "<span class=\"pill bad\">Problem</span>")} <span class="muted">{E(status.Detail)}</span></td>
+                </tr>
+                """);
         var disk = "";
         if (diskFree is { } free && diskTotal is { } total && total > 0)
         {
@@ -302,10 +316,21 @@ internal static class AdminPages
         return Shell("Overview", $"""
             <div class="stats">
             <div class="card stat"><div class="label">Accounts</div><div class="value">{rows.Count}</div><div class="note">{Plural(devices, "device")} signed in</div></div>
-            <div class="card stat"><div class="label">Backups</div><div class="value">{Mib(bytes)}</div><div class="note">{Plural(rows.Sum(r => r.Versions), "version")} kept</div></div>
+            <div class="card stat"><div class="label">Backups</div><div class="value">{(backupsKnown ? Mib(bytes) : "—")}</div><div class="note">{(backupsKnown ? Plural(rows.Sum(r => r.Versions), "version") + " kept" : "not available")}</div></div>
             <div class="card stat"><div class="label">Signup codes</div><div class="value">{working}</div><div class="note">{(working == 1 ? "works" : "work")} now, {codes.Count} made</div></div>
             {disk}
             </div>
+
+            {(storageRows.Length == 0 ? "" : $"""
+            <section class="card">
+            <header><div><h2>Storage</h2><p class="muted small">Where everything is kept, and whether it answers.</p></div></header>
+            <div class="scroll"><table>
+            <thead><tr><th>What</th><th>Where</th><th>Status</th></tr></thead>
+            <tbody>
+            {storageRows}
+            </tbody></table></div>
+            </section>
+            """)}
 
             <section class="card">
             <header><div><h2>Accounts</h2><p class="muted small">Backups are locked on each person's device: nothing here can read one.</p></div></header>

@@ -58,6 +58,36 @@ public sealed class BackupStore : IBackupStore
 
     public IReadOnlyList<BackupVersion> Versions(string account) => List(Folder(account));
 
+    public Task<IReadOnlyDictionary<string, AccountBackups>> SummariesAsync(CancellationToken cancel = default)
+    {
+        var all = new Dictionary<string, AccountBackups>();
+        if (Directory.Exists(_root))
+            foreach (var folder in Directory.EnumerateDirectories(_root))
+            {
+                var account = Path.GetFileName(folder);
+                if (account.Length != 64 || !account.All(c => c is (>= '0' and <= '9') or (>= 'a' and <= 'f'))) continue;
+                var versions = List(folder);
+                if (versions.Count > 0) all[account] = new AccountBackups(versions.Count, versions.Sum(v => v.Size), versions[0].At);
+            }
+        return Task.FromResult<IReadOnlyDictionary<string, AccountBackups>>(all);
+    }
+
+    public Task<StoreStatus> StatusAsync(CancellationToken cancel = default)
+    {
+        try
+        {
+            // Writable, not only there: a read-only or full volume is a problem the admin wants to see.
+            var probe = Path.Combine(_root, "probe-" + Guid.NewGuid().ToString("N") + ".tmp");
+            File.WriteAllText(probe, "x");
+            File.Delete(probe);
+            return Task.FromResult(new StoreStatus("Files", "the data folder", true, "writable"));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return Task.FromResult(new StoreStatus("Files", "the data folder", false, "cannot write: " + ex.Message));
+        }
+    }
+
     public Task<IReadOnlyList<BackupVersion>> VersionsAsync(string account, CancellationToken cancel = default) => Task.FromResult(Versions(account));
 
     public Task<(Stream Content, BackupVersion Info)?> OpenAsync(string account, int? version, CancellationToken cancel = default) => Task.FromResult(Open(account, version));

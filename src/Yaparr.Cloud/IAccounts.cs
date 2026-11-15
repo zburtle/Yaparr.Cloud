@@ -61,4 +61,7 @@ public interface IAccounts
 
     /// <summary>The authenticator secret of an admin, or null for anyone else.</summary>
     string? TotpSecretOf(string name);
+
+    /// <summary>Where the accounts (and signup codes) are kept and whether that can be reached now. Never throws: a database that is down says so.</summary>
+    Task<StoreStatus> StatusAsync(CancellationToken cancel = default);
 }

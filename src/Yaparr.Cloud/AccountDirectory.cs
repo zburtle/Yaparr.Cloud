@@ -135,6 +135,20 @@ public sealed partial class AccountDirectory : IAccounts
         }
     }
 
+    public Task<StoreStatus> StatusAsync(CancellationToken cancel = default)
+    {
+        try
+        {
+            var count = List().Count;
+            return Task.FromResult(new StoreStatus("Files", "accounts.json and codes.json in the data folder", true, Plural(count)));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return Task.FromResult(new StoreStatus("Files", "accounts.json and codes.json in the data folder", false, "cannot read: " + ex.Message));
+        }
+        static string Plural(int n) => n == 1 ? "1 account" : n + " accounts";
+    }
+
     public IReadOnlyList<AccountEntry> List()
     {
         lock (_gate)

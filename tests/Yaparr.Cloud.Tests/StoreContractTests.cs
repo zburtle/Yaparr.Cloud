@@ -163,6 +163,18 @@ public abstract class StoreContractTests : IDisposable
         Assert.InRange(list[0].Created, DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddMinutes(1));
     }
 
+    [SkippableFact]
+    public async Task The_store_says_where_it_is_and_that_it_answers()
+    {
+        var accounts = NewAccounts();
+        accounts.Add("sam@example.com", Password);
+        var status = await accounts.StatusAsync();
+        Assert.True(status.Ok, status.Detail);
+        Assert.NotEmpty(status.Kind);
+        Assert.NotEmpty(status.Where);
+        Assert.Contains("1 account", status.Detail);
+    }
+
     // ---- signing up ----
 
     [SkippableFact]
@@ -434,4 +446,26 @@ public sealed class PostgresStoreTests : StoreContractTests
     protected override ISignupCodes NewCodes(Func<DateTimeOffset>? now = null) => Stores.Codes(Options, now ?? (() => DateTimeOffset.UtcNow));
 
     public override void Dispose() => _database.Dispose();
+
+    [SkippableFact]
+    public async Task The_database_says_what_it_is()
+    {
+        var status = await NewAccounts().StatusAsync();
+        Assert.Equal("PostgreSQL", status.Kind);
+        Assert.StartsWith("database ", status.Where);
+        Assert.Matches(@"version \d+", status.Detail);
+        Assert.Contains("MiB", status.Detail);
+    }
+
+    [SkippableFact]
+    public async Task A_database_that_is_down_says_so_quickly_and_does_not_throw()
+    {
+        using var source = NpgsqlDataSource.Create("Host=127.0.0.1;Port=1;Username=x;Password=x;Database=x;Timeout=3");
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var status = await new PostgresAccounts(source).StatusAsync();
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(10));
+        Assert.False(status.Ok);
+        Assert.Equal("PostgreSQL", status.Kind);
+        Assert.NotEmpty(status.Detail);
+    }
 }

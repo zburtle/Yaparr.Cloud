@@ -25,6 +25,7 @@ builder.Services.AddSingleton<WriteLimiter>();
 builder.Services.AddSingleton<LoginFlow>();
 builder.Services.AddSingleton<SignInHandoff>();
 builder.Services.AddSingleton<LoginLimiter>();
+builder.Services.AddSingleton<AdminSessions>();
 builder.WebHost.ConfigureKestrel(k => k.Limits.MaxRequestBodySize = options.MaxBlobBytes + 1024);
 
 // Behind a reverse proxy (the usual way to give it https) the address of the caller is in a header, not on the connection.
@@ -187,6 +188,10 @@ app.MapPost("/account/setup", async (HttpContext http, AccountDirectory accounts
     return Html(http, Pages.Welcome(done, server, phone ? null : SignInHandoff.AppLink(handoff.Create(done), server)));
 }).DisableAntiforgery();
 
+// ---- the admin portal, for the person running the service (see AdminPortal) ----
+
+app.MapAdminPortal(options);
+
 // ---- the backup, for an app that is signed in (Authorization: Bearer <token>) ----
 
 var backup = app.MapGroup("/v1/backup");
@@ -246,16 +251,7 @@ static string? BearerOf(HttpContext http)
 }
 
 // A page for a browser: never kept, never framed by another site, and with nothing it could load from anywhere.
-static IResult Html(HttpContext http, string page, int status = StatusCodes.Status200OK)
-{
-    var headers = http.Response.Headers;
-    headers.CacheControl = "no-store";
-    headers.ContentSecurityPolicy = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'";
-    headers.XFrameOptions = "DENY";
-    headers.XContentTypeOptions = "nosniff";
-    headers["Referrer-Policy"] = "no-referrer";
-    return Results.Content(page, "text/html; charset=utf-8", statusCode: status);
-}
+static IResult Html(HttpContext http, string page, int status = StatusCodes.Status200OK) => Responses.Html(http, page, status);
 
 internal sealed record TokenRequest(string? Code, string? Verifier);
 

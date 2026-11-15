@@ -26,11 +26,20 @@ dotnet Yaparr.Cloud.dll accounts add <email> [--password <password>]
 dotnet Yaparr.Cloud.dll accounts password <email> [--password <password>]
 dotnet Yaparr.Cloud.dll accounts remove <email> [--keep-backup]
 dotnet Yaparr.Cloud.dll accounts list
+dotnet Yaparr.Cloud.dll accounts admin <email> [--remove]
 ```
 
 `add` and `password` without `--password` make one up (like `K7QD-M3XF-9PLR-2WTE-HV8N`) and show it once; give it to the person, who can change it on the sign-in page. Typing a password after `--password` leaves it in your shell history, so prefer the made-up one. `password` also signs the account's devices out. `remove` deletes the backup unless told not to. `list` shows how many devices are signed in and the space used.
 
 An account whose name is not an email address (from before accounts were named by one) cannot sign in, and `accounts list` says so: add the person again with their address. An account made by the first version of the service (which kept a public key and no password) shows as `NO PASSWORD` in the list and cannot sign in until `accounts password <name>` gives it one. Backups from that version were locked with the old password, not a recovery code.
+
+### The admin portal (`/admin`)
+
+The same jobs in a browser: the accounts (devices, space used, when the last backup was made), adding one, resetting a password, removing one with its backup, and making, listing and revoking signup codes. It can never read a backup (they are locked on the person's device).
+
+It is **off until you make an account an admin**, on the server: `accounts admin you@example.com` (the account needs a password). That shows, once, the key for an authenticator app (add it by key, or from the `otpauth://` link). Until then every address under `/admin` answers 404. Signing in at `/admin` asks for the email address, the password **and** a code from the app; every wrong try gets the same answer, eight wrong tries lock the address and the name for a quarter of an hour, and each code works once. A session ends after half an hour of nothing (eight hours at the most), is a cookie that scripts cannot read and that is only sent to `/admin` from this site (`HttpOnly`, `SameSite=Strict`, `Secure` over https), and every change is a form carrying a token that belongs to the session. What an admin does is written to the service's log (`docker compose logs cloud`).
+
+Making an account an admin, or taking that away (`accounts admin <email> --remove`), is possible only from the command line, and the portal will not remove an admin account. Running `accounts admin` again makes a new key, which is what to do with a lost phone. The key is kept in `accounts.json` (the service has to check the codes), so protect that file like the password hashes beside it. To keep the portal off the internet altogether, add to the `Caddyfile` a `@admin path /admin*` matcher with `respond @admin 404` (or an `remote_ip` allowlist).
 
 ### Signup codes: friends sign themselves up
 

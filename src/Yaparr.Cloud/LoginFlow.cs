@@ -115,9 +115,9 @@ public sealed class LoginLimiter
 /// <summary>The few pages a browser sees. Plain HTML with no scripts, and everything that came from a request is encoded before it is shown.</summary>
 public static class Pages
 {
-    private static string E(string? text) => WebUtility.HtmlEncode(text ?? "");
+    internal static string E(string? text) => WebUtility.HtmlEncode(text ?? "");
 
-    private static string Page(string title, string body) => $$"""
+    internal static string Page(string title, string body, bool wide = false) => $$"""
         <!doctype html>
         <html lang="en">
         <head>
@@ -128,7 +128,14 @@ public static class Pages
         <style>
         :root { color-scheme: light dark; }
         body { font: 16px/1.5 system-ui, sans-serif; margin: 0; padding: 24px 16px; background: Canvas; color: CanvasText; }
-        main { max-width: 380px; margin: 8vh auto 0; }
+        main { max-width: {{(wide ? "960px" : "380px")}}; margin: {{(wide ? "3vh" : "8vh")}} auto 0; }
+        table { border-collapse: collapse; width: 100%; font-size: 14px; }
+        th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid color-mix(in srgb, GrayText 40%, transparent); vertical-align: top; }
+        td form { display: inline; }
+        td button, .inline button { margin: 0; width: auto; padding: 4px 10px; font-size: 13px; }
+        .danger { background: #d93b3b; }
+        .inline input { width: auto; }
+        code { font-family: ui-monospace, monospace; word-break: break-all; }
         h1 { font-size: 22px; margin: 0 0 4px; }
         p { margin: 8px 0 16px; }
         label { display: block; font-size: 14px; margin: 14px 0 4px; }

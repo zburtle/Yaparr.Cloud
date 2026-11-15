@@ -87,6 +87,51 @@ public sealed class S3BackupStore : IBackupStore
         return found.OrderByDescending(v => v.Version).ToList();
     }
 
+    public async Task<IReadOnlyDictionary<string, AccountBackups>> SummariesAsync(CancellationToken cancel = default)
+    {
+        // One walk over everything under the prefix (a request for each thousand objects), grouped by account: not a request for each account.
+        var perAccount = new Dictionary<string, List<BackupVersion>>();
+        foreach (var o in await ObjectsAsync(_prefix, cancel).ConfigureAwait(false))
+        {
+            var rest = o.Key[_prefix.Length..];
+            var slash = rest.IndexOf('/');
+            if (slash != 64) continue;
+            var account = rest[..64];
+            var name = rest[65..];
+            if (!account.All(c => c is (>= '0' and <= '9') or (>= 'a' and <= 'f'))) continue;
+            if (name.Length != 13 || name[0] != 'v' || !name.EndsWith(".bin", StringComparison.Ordinal)) continue;
+            if (!int.TryParse(name.AsSpan(1, 8), NumberStyles.None, CultureInfo.InvariantCulture, out var version)) continue;
+            if (!perAccount.TryGetValue(account, out var list)) perAccount[account] = list = new List<BackupVersion>();
+            list.Add(new BackupVersion(version, o.Size ?? 0, Utc(o.LastModified)));
+        }
+        return perAccount.ToDictionary(p => p.Key, p => new AccountBackups(p.Value.Count, p.Value.Sum(v => v.Size), p.Value.Max(v => v.At)));
+    }
+
+    public async Task<StoreStatus> StatusAsync(CancellationToken cancel = default)
+    {
+        var kind = KindOf(_options.S3Endpoint);
+        var where = _prefix.Length > 0 && _prefix != "backups/" ? $"bucket {_bucket}, {_prefix}" : "bucket " + _bucket;
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            await _s3.ListObjectsV2Async(new ListObjectsV2Request { BucketName = _bucket, Prefix = _prefix, MaxKeys = 1 }, timeout.Token).ConfigureAwait(false);
+            return new StoreStatus(kind, where, true, $"answers in {clock.ElapsedMilliseconds} ms");
+        }
+        catch (Exception ex) when (ex is AmazonServiceException or AmazonClientException or HttpRequestException or OperationCanceledException or IOException)
+        {
+            var why = ex is OperationCanceledException ? "did not answer in 5 seconds" : ex is AmazonS3Exception s3 ? $"{(int)s3.StatusCode} {s3.ErrorCode}".Trim() : ex.Message.Split('\n')[0].Trim();
+            return new StoreStatus(kind, where, false, why.Length > 160 ? why[..160] + "…" : why);
+        }
+    }
+
+    // A name for the store from its address, without the address itself (the account id is part of an R2 address).
+    private static string KindOf(string endpoint) =>
+        endpoint.Contains(".r2.cloudflarestorage.com", StringComparison.OrdinalIgnoreCase) ? "Cloudflare R2"
+        : endpoint.Contains("digitaloceanspaces.com", StringComparison.OrdinalIgnoreCase) ? "DigitalOcean Spaces"
+        : "S3-compatible store";
+
     public async Task<IReadOnlyList<BackupVersion>> VersionsAsync(string account, CancellationToken cancel = default) =>
         await ListAsync(account, cancel).ConfigureAwait(false);
 

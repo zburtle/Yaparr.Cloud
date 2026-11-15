@@ -4,7 +4,7 @@ This guide takes you from nothing to friends signing up and backing up. It cover
 
 | Piece | Where it runs | Repository |
 | --- | --- | --- |
-| **The backup server** (this repository): the sign-in pages and the API | a DigitalOcean droplet, at `cloud.yaparr.com` | `Yaparr.Cloud` (private) |
+| **The backup server** (this repository): the sign-in pages and the API | a DigitalOcean droplet, at `cloud.yaparr.com` | `Yaparr.Cloud` (public, AGPL-3.0) |
 | **The website**, with the sign-up page at `/signup` | GitHub Pages, at `yaparr.com` (it already is) | `Yaparr.Web` |
 | **The app**, which is released with `cloud.yaparr.com` filled in | your friends' computers | `Yaparr` |
 

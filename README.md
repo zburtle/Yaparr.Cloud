@@ -1,6 +1,6 @@
 # Yaparr.Cloud
 
-Private. Optional services for Yaparr. Nothing here is needed to use Yaparr, and nothing in the client may depend on it or be held back without it.
+Optional services for Yaparr, licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0): anyone may run and change it, and if you offer a modified version to others over a network you must offer them its source. The hosted service at cloud.yaparr.com is offered separately. Nothing here is needed to use Yaparr, and nothing in the client may depend on it or be held back without it.
 
 ## Backup storage
 

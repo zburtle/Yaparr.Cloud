@@ -19,6 +19,9 @@ internal static class AdminPages
 
     private static string Plural(long n, string one, string many = "") => n == 1 ? $"{n} {one}" : $"{n} {(many.Length > 0 ? many : one + "s")}";
 
+    // The Yaparr icon (assets/logo/yaparr-icon.svg in the app's repository), drawn into the page: the pages load nothing from anywhere else.
+    private const string Logo = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><defs><linearGradient id="yb" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6A84F5"/><stop offset="1" stop-color="#3A4FD0"/></linearGradient></defs><rect width="256" height="256" rx="58" fill="url(#yb)"/><g stroke-linecap="round" stroke-width="13" fill="none"><path d="M70 92L50 58" stroke="#F2A93B"/><path d="M88 86L80 48" stroke="#F0605F"/><path d="M106 86L112 50" stroke="#F2A93B"/></g><circle cx="86" cy="140" r="56" fill="#fff"/><circle cx="72" cy="158" r="13" fill="#F2A93B" opacity=".35"/><path d="M134 98C168 90 198 104 198 134C188 122 168 118 134 120Z" fill="#F2A93B" transform="rotate(-14 134 109)"/><path d="M134 142C160 144 182 150 186 166C168 176 148 168 134 158Z" fill="#E08A1E"/><path d="M42 112L102 124M102 124L124 98" stroke="#26306B" stroke-width="6" stroke-linecap="round" fill="none"/><circle cx="102" cy="124" r="15" fill="#26306B"/><g stroke="#fff" stroke-width="10" stroke-linecap="round" fill="none"><path d="M208 122a22 22 0 0 1 0 34"/><path d="M222 108a42 42 0 0 1 0 64" opacity=".75"/></g></svg>""";
+
     private static string Token(string csrf) => $"<input type=\"hidden\" name=\"csrf\" value=\"{E(csrf)}\">";
 
     private const string Style = """
@@ -52,7 +55,7 @@ internal static class AdminPages
         .top { background: var(--card); border-bottom: 1px solid var(--line); }
         .top > div { max-width: 1080px; margin: 0 auto; padding: 12px 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
         .brand { font-weight: 700; letter-spacing: -.01em; display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--text); }
-        .brand i { width: 26px; height: 26px; border-radius: 7px; background: var(--accent); display: inline-block; }
+        .brand svg { width: 28px; height: 28px; flex: none; }
         .brand span { color: var(--muted); font-weight: 500; }
         .who { margin-left: auto; display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 13px; }
         .who form { margin: 0; }
@@ -60,7 +63,7 @@ internal static class AdminPages
         .wrap { max-width: 1080px; margin: 0 auto; padding: 24px 20px 56px; }
         .narrow { max-width: 440px; margin: 0 auto; padding: 8vh 20px 56px; }
         .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
-        .card + .card, .stats + .card { margin-top: 20px; }
+        section.card + section.card, .stats + section.card { margin-top: 20px; }
         .card > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 16px 20px; border-bottom: 1px solid var(--line); }
         .card > header p { margin: 2px 0 0; }
         .body { padding: 20px; }
@@ -127,7 +130,7 @@ internal static class AdminPages
           .stats { grid-template-columns: repeat(2, 1fr); gap: 10px; }
           .stat { padding: 12px 14px; }
           .stat .value { font-size: 20px; }
-          .card + .card, .stats + .card { margin-top: 14px; }
+          section.card + section.card, .stats + section.card { margin-top: 14px; }
           .who { margin-left: 0; width: 100%; justify-content: space-between; }
         }
         """;
@@ -148,7 +151,7 @@ internal static class AdminPages
         <body>
         {{(user == null ? "" : $"""
         <div class="top"><div>
-        <a class="brand" href="/admin"><i aria-hidden="true"></i>Yaparr cloud <span>Admin</span></a>
+        <a class="brand" href="/admin">{Logo}Yaparr cloud <span>Admin</span></a>
         <div class="who">{E(user)}
         <form method="post" action="/admin/logout">{Token(csrf ?? "")}<button class="btn secondary small" type="submit">Sign out</button></form></div>
         </div></div>
@@ -164,7 +167,7 @@ internal static class AdminPages
 
     public static string Login(string username, string? problem) => Shell("Sign in", $"""
         <div class="card login">
-        <div class="brand"><i aria-hidden="true"></i>Yaparr cloud <span>Admin</span></div>
+        <div class="brand">{Logo}Yaparr cloud <span>Admin</span></div>
         <h1>Sign in</h1>
         <p class="muted">With your account's password and the code from your authenticator app.</p>
         {Alert(problem)}

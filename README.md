@@ -49,9 +49,10 @@ Instead of making every account by hand, make a **code** and send a link with it
 dotnet Yaparr.Cloud.dll codes add [--note "who it is for"] [--uses 10] [--days 30]
 dotnet Yaparr.Cloud.dll codes list
 dotnet Yaparr.Cloud.dll codes revoke <id>
+dotnet Yaparr.Cloud.dll codes delete <id>
 ```
 
-`codes add` prints the code and the link, once: only a hash of the code is kept, so it cannot be shown again (the `id` that `list` shows is only for telling codes apart and revoking them). `--uses` limits how many people can use it, `--days` how long it works. `codes list` shows each code, whether it still works (`works`, `used up`, `expired`, `revoked`), and who signed up with it. `revoke` stops a code; the people who already signed up keep their accounts.
+`codes add` prints the code and the link, once: only a hash of the code is kept, so it cannot be shown again (the `id` that `list` shows is only for telling codes apart and revoking them). `--uses` limits how many people can use it, `--days` how long it works. `codes list` shows each code, whether it still works (`works`, `used up`, `expired`, `revoked`), and who signed up with it. `revoke` stops a code but keeps its record; `delete` takes it out altogether, with the record of who used it. Either way the people who already signed up keep their accounts.
 
 The link is the sign-up page on the website with the server and the code in the fragment (`https://yaparr.com/signup#server=…&code=…`), so neither reaches the website's host. `PublicUrl` (this service's address) and `SignupPageUrl` (the page on the website) come from `appsettings.json`, which is part of every build and image: they are **`https://cloud.yaparr.com`** and `https://yaparr.com/signup`, so the link comes out whole. Set `Service__PublicUrl` or `Service__SignupPageUrl` to change them for another deployment; the app ships with the same server address in its own `yaparr.release.json`.
 

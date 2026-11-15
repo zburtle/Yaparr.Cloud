@@ -145,6 +145,23 @@ public sealed class SignupCodes
     }
 
     /// <summary>
+    /// Takes a code out altogether, by its id: it stops working (as if revoked) and the record of it, including who signed up with it, is gone. People
+    /// who already signed up keep their accounts. False if there is no such code.
+    /// </summary>
+    public bool Delete(string id)
+    {
+        lock (_gate)
+        {
+            Refresh();
+            id = id.Trim().ToLowerInvariant();
+            if (!_model.Codes.Remove(id)) return false;
+            foreach (var hash in _model.Hashes.Where(h => h.Value == id).Select(h => h.Key).ToList()) _model.Hashes.Remove(hash);
+            Save();
+            return true;
+        }
+    }
+
+    /// <summary>
     /// Whether this code works now, and which one it is (its id), without using it. Null for a code that does not exist, was revoked, has expired or
     /// is used up: the caller says the same thing for all of them, so a stranger learns nothing about codes.
     /// </summary>

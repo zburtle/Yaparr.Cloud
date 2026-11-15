@@ -219,6 +219,19 @@ internal static class AdminPages
         </div></div>
         """, session.User, session.Csrf, narrow: true);
 
+    public static string ConfirmDeleteCode(AdminSession session, SignupCodeInfo code, DateTimeOffset now) => Shell("Delete a code", $"""
+        <div class="card"><div class="body">
+        <h1>Delete {(code.Note.Length > 0 ? E(code.Note) : "this code")}?</h1>
+        <p class="muted">Code <code>{E(code.Id)}</code>{(code.Problem(now) is null ? ", which still works" : "")}, used by {Plural(code.Uses.Count, "person", "people")}. This takes it out altogether{(code.Problem(now) is null ? ": the link stops working" : "")}, and forgets who signed up with it. Their accounts are not touched. It cannot be undone.</p>
+        <form method="post" action="/admin/codes/delete">
+        {Token(session.Csrf)}
+        <input type="hidden" name="id" value="{E(code.Id)}">
+        <div class="actions-row"><button class="btn danger" type="submit">Delete the code</button>
+        <a class="btn secondary" href="/admin">Cancel</a></div>
+        </form>
+        </div></div>
+        """, session.User, session.Csrf, narrow: true);
+
     private static string CodePill(string status) => status switch
     {
         "works" => "<span class=\"pill ok\">Works</span>",
@@ -263,7 +276,8 @@ internal static class AdminPages
                 <td>{c.Uses.Count}{(c.MaxUses is { } max ? $" of {max}" : "")}</td>
                 <td>{(c.Expires is { } end ? end.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : "<span class=\"muted\">Never</span>")}</td>
                 <td>{who}</td>
-                <td class="actions">{(c.Revoked ? "" : $"<form method=\"post\" action=\"/admin/codes/revoke\">{token}<input type=\"hidden\" name=\"id\" value=\"{E(c.Id)}\"><button class=\"btn link-danger\" type=\"submit\" aria-label=\"Revoke the code {E(c.Id)}\">Revoke</button></form>")}</td>
+                <td class="actions">{(c.Revoked ? "" : $"<form method=\"post\" action=\"/admin/codes/revoke\">{token}<input type=\"hidden\" name=\"id\" value=\"{E(c.Id)}\"><button class=\"btn link-danger\" type=\"submit\" aria-label=\"Revoke the code {E(c.Id)}\">Revoke</button></form>")}
+                <a class="btn link-danger" href="/admin/codes/delete?id={Uri.EscapeDataString(c.Id)}" aria-label="Delete the code {E(c.Id)}">Delete</a></td>
                 </tr>
                 """);
         }

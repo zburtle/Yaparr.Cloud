@@ -491,4 +491,46 @@ public sealed class AdminPortalTests : ServiceTest
         Assert.Contains(secret, File.ReadAllText(Path.Combine(Dir, "accounts.json")));   // the service has to be able to check a code
         Assert.True(accounts.List().Single().IsAdmin);
     }
+
+    // ---- deleting a code ----
+
+    [Fact]
+    public async Task A_code_is_deleted_after_a_page_that_says_what_that_does()
+    {
+        var admin = NewAdmin();
+        var codes = new SignupCodes(Options);
+        var (code, info) = codes.Create("book club", null, null);
+        var (keep, keepInfo) = codes.Create("family", null, null);
+        var (cookie, csrf, overview) = await Open(admin);
+        Assert.Contains($"/admin/codes/delete?id={info.Id}", overview);
+
+        var ask = await Get(admin.Client, $"/admin/codes/delete?id={info.Id}", cookie);
+        Assert.Equal(HttpStatusCode.OK, ask.StatusCode);
+        var page = await ask.Content.ReadAsStringAsync();
+        Assert.Contains("forgets who signed up with it", page);
+        Assert.Contains("the link stops working", page);
+        Assert.NotNull(codes.Check(code));                                // asking deleted nothing
+
+        var done = await Form(admin.Client, "/admin/codes/delete", new() { ["csrf"] = csrf, ["id"] = info.Id }, cookie);
+        Assert.Equal(HttpStatusCode.Redirect, done.StatusCode);
+        Assert.Null(codes.Check(code));
+        Assert.NotNull(codes.Check(keep));
+        Assert.DoesNotContain(codes.List(), c => c.Id == info.Id);
+        Assert.Contains(codes.List(), c => c.Id == keepInfo.Id);
+
+        Assert.Equal(HttpStatusCode.NotFound, (await Form(admin.Client, "/admin/codes/delete", new() { ["csrf"] = csrf, ["id"] = info.Id }, cookie)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await Get(admin.Client, "/admin/codes/delete?id=nothing", cookie)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Deleting_a_code_needs_the_session_and_its_token()
+    {
+        var admin = NewAdmin();
+        var (code, info) = new SignupCodes(Options).Create("", null, null);
+        var (cookie, csrf, _) = await Open(admin);
+        Assert.Equal(HttpStatusCode.Forbidden, (await Form(admin.Client, "/admin/codes/delete", new() { ["id"] = info.Id }, cookie)).StatusCode);
+        Assert.Equal(HttpStatusCode.Redirect, (await Form(admin.Client, "/admin/codes/delete", new() { ["csrf"] = csrf, ["id"] = info.Id })).StatusCode);
+        Assert.Equal("/admin/login", (await Get(admin.Client, $"/admin/codes/delete?id={info.Id}")).Headers.Location!.OriginalString);
+        Assert.NotNull(new SignupCodes(Options).Check(code));
+    }
 }

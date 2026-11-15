@@ -30,6 +30,19 @@ main() {
     return 1
   }
 
+  # Starts the service from the image CI published for the commit that is checked out; if there is none (a branch, or ghcr.io cannot be reached) the
+  # image is built here instead.
+  start_service() {
+    export IMAGE_TAG="sha-$(git rev-parse HEAD)"
+    if docker compose pull --quiet cloud 2>/dev/null; then
+      echo "using the published image ${IMAGE_TAG}"
+      docker compose up -d
+    else
+      echo "no published image for this commit, building it here"
+      docker compose up -d --build
+    fi
+  }
+
   local action="${SSH_ORIGINAL_COMMAND:-${1:-}}"
   case "$action" in
     check)
@@ -54,7 +67,7 @@ main() {
   git merge --ff-only --quiet "origin/$branch"
   echo "deploying $branch: $(git log --oneline -1)"
 
-  docker compose up -d --build
+  start_service
   if wait_healthy; then
     echo "healthy"
     docker image prune -f > /dev/null
@@ -64,7 +77,7 @@ main() {
   echo "NOT healthy after ${timeout}s, so going back to ${previous}" >&2
   docker compose logs --tail 30 cloud >&2 || true
   git checkout --quiet "$previous"
-  docker compose up -d --build
+  start_service
   if wait_healthy; then echo "back on ${previous}, healthy" >&2; else echo "still not healthy after going back: look at it by hand" >&2; fi
   return 1
 }

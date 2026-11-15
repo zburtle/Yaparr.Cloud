@@ -8,6 +8,9 @@ COPY src/Yaparr.Cloud/ src/Yaparr.Cloud/
 RUN dotnet publish src/Yaparr.Cloud/Yaparr.Cloud.csproj -c Release -o /app --no-restore
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
+# Ties the published image to this repository (ghcr.io shows it there, and gives the image the repository's visibility).
+LABEL org.opencontainers.image.source="https://github.com/zburtle/Yaparr.Cloud" \
+      org.opencontainers.image.description="The Yaparr backup server (cloud.yaparr.com)"
 WORKDIR /app
 COPY --from=build /app .
 

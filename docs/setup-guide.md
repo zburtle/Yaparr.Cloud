@@ -144,7 +144,7 @@ Merge the app's pull request. The app is released with `yaparr.release.json` bes
 
 | To | Run (in the `Yaparr.Cloud` folder) |
 | --- | --- |
-| Update the server | `./deploy.sh deploy` (gets `master`, rebuilds, waits for the service to be healthy and goes back by itself if it is not). With automatic deploys (section 10a) a merge to `master` does this for you. |
+| Update the server | `./deploy.sh deploy` (gets `master`, pulls the image CI published for that commit, or builds it if there is none, waits for the service to be healthy and goes back by itself if it is not). With automatic deploys (section 10a) a merge to `master` does this for you. |
 | See what is running | `./deploy.sh check` |
 | See what it is doing | `docker compose logs -f cloud` |
 | Add a friend by hand | `docker compose exec cloud dotnet Yaparr.Cloud.dll accounts add them@example.com` |
@@ -153,6 +153,12 @@ Merge the app's pull request. The app is released with `yaparr.release.json` bes
 | Who has accounts, and the space used | `docker compose exec cloud dotnet Yaparr.Cloud.dll accounts list` |
 | Make, list or stop signup codes | `docker compose exec cloud dotnet Yaparr.Cloud.dll codes add` / `codes list` / `codes revoke <id>` |
 | Copy all the data off the machine | `docker compose cp cloud:/data ./cloud-data-$(date +%F)` |
+
+## 10b. The published image
+
+After a merge to `master`, CI builds the image and publishes it to `ghcr.io/zburtle/yaparr-cloud`, tagged `sha-<commit>` and `latest`. `deploy.sh` pulls the one for the commit it checked out, so the droplet no longer builds anything (and needs no spare memory or disk for it). If there is no such image (a branch, or `ghcr.io` cannot be reached) it builds the image itself, as before. Anyone can run the service without cloning this repository: `docker run -p 8080:8080 -v cloud-data:/data ghcr.io/zburtle/yaparr-cloud:latest`.
+
+The first time the image is published GitHub makes the package. Open it (the repository's **Packages** section) and check its settings say Public. The package is tied to this repository by a label in the Dockerfile, which normally gives it the repository's visibility; if it is private, set it public by hand once (the API cannot do that).
 
 ## 10a. Automatic deploys (optional)
 

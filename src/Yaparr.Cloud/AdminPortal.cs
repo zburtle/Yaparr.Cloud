@@ -108,7 +108,7 @@ public static class AdminPortal
         admin.MapGet("/accounts/remove", (HttpContext http, AccountDirectory accounts, AdminSessions sessions, string? name) =>
             Current(http, accounts, sessions) is not { } session ? Results.Redirect("/admin/login")
             : AccountDirectory.Normalize(name) is { } who && accounts.Exists(who)
-                ? Html(http, AdminPages.ConfirmRemove(session.Csrf, who, accounts.IsAdmin(who)))
+                ? Html(http, AdminPages.ConfirmRemove(session, who, accounts.IsAdmin(who)))
                 : Html(http, AdminPages.Result("There is no such account", "It may have been removed."), StatusCodes.Status404NotFound));
 
         admin.MapPost("/accounts/remove", (HttpContext http, AccountDirectory accounts, AdminSessions sessions, BackupStore store) => Post(http, accounts, sessions, async (session, form) =>
@@ -118,7 +118,7 @@ public static class AdminPortal
             if (accounts.IsAdmin(name))
                 return Html(http, AdminPages.Result("This account is an admin", "Take the portal away first, on the server: accounts admin " + name + " --remove"), StatusCodes.Status409Conflict);
             if (!string.Equals(form["confirm"].ToString().Trim(), name, StringComparison.OrdinalIgnoreCase))
-                return Html(http, AdminPages.ConfirmRemove(session.Csrf, name, false, "That is not the account's address, so nothing was removed."), StatusCodes.Status400BadRequest);
+                return Html(http, AdminPages.ConfirmRemove(session, name, false, "That is not the account's address, so nothing was removed."), StatusCodes.Status400BadRequest);
             accounts.Remove(name);
             var hadBackup = await store.DeleteAsync(BackupStore.FolderOf(name), CancellationToken.None);
             log.LogInformation("Admin {Admin} removed the account {Account} ({Backup})", session.User, name, hadBackup ? "its backup was deleted" : "it had no backup");
@@ -206,127 +206,5 @@ public static class AdminPortal
         catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException) { }
 
         return AdminPages.Dashboard(session, rows, codes.List(), DateTimeOffset.UtcNow, free, total);
-    }
-}
-
-/// <summary>The admin portal's pages: plain HTML with no scripts, everything that came from a request encoded before it is shown.</summary>
-internal static class AdminPages
-{
-    public sealed record AccountRow(AccountEntry Account, int Versions, long Bytes, DateTimeOffset? Last);
-
-    private static string E(string? text) => Pages.E(text);
-
-    private static string Mib(long bytes) => (bytes / 1024.0 / 1024.0).ToString("0.0", CultureInfo.InvariantCulture) + " MiB";
-
-    private static string Gib(long bytes) => (bytes / 1024.0 / 1024.0 / 1024.0).ToString("0.0", CultureInfo.InvariantCulture) + " GiB";
-
-    private static string Token(string csrf) => $"<input type=\"hidden\" name=\"csrf\" value=\"{E(csrf)}\">";
-
-    public static string Login(string username, string? problem) => Pages.Page("Admin sign-in", $"""
-        <h1>Admin</h1>
-        {(problem == null ? "" : $"<p class=\"problem\" role=\"alert\">{E(problem)}</p>")}
-        <form method="post" action="/admin/login">
-        <label for="username">Email address</label>
-        <input id="username" name="username" type="email" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="254" required value="{E(username)}"{(username.Length == 0 ? " autofocus" : "")}>
-        <label for="password">Password</label>
-        <input id="password" name="password" type="password" autocomplete="current-password" required{(username.Length == 0 ? "" : " autofocus")}>
-        <label for="code">Code from your authenticator app</label>
-        <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="10" required>
-        <button type="submit">Sign in</button>
-        </form>
-        """);
-
-    public static string Result(string title, string text) => Pages.Page(title, $"""
-        <h1>{E(title)}</h1>
-        <p>{E(text)}</p>
-        <p><a href="/admin">Back to the overview</a></p>
-        """);
-
-    /// <summary>A page that shows something once (a new password, a signup link): it is never kept.</summary>
-    public static string Secret(string title, string text, string secret) => Pages.Page(title, $"""
-        <h1>{E(title)}</h1>
-        <p>{E(text)}</p>
-        <p><code>{E(secret)}</code></p>
-        <p><a href="/admin">Back to the overview</a></p>
-        """);
-
-    public static string ConfirmRemove(string csrf, string name, bool isAdmin, string? problem = null) => Pages.Page("Remove " + name, $"""
-        <h1>Remove {E(name)}?</h1>
-        {(isAdmin ? "<p class=\"problem\">This account is an admin, so it cannot be removed here. Take the portal away first, on the server: <code>accounts admin " + E(name) + " --remove</code></p>" : $"""
-        <p>This removes the account <strong>and deletes its backup</strong>. It cannot be undone.</p>
-        {(problem == null ? "" : $"<p class=\"problem\" role=\"alert\">{E(problem)}</p>")}
-        <form method="post" action="/admin/accounts/remove">
-        {Token(csrf)}
-        <input type="hidden" name="name" value="{E(name)}">
-        <label for="confirm">Type the account's email address to confirm</label>
-        <input id="confirm" name="confirm" type="email" autocomplete="off" autocapitalize="none" spellcheck="false" required autofocus>
-        <button type="submit" class="danger">Remove the account and its backup</button>
-        </form>
-        """)}
-        <p><a href="/admin">Back to the overview</a></p>
-        """);
-
-    public static string Dashboard(AdminSession session, IReadOnlyList<AccountRow> rows, IReadOnlyList<SignupCodeInfo> codes, DateTimeOffset now, long? diskFree, long? diskTotal)
-    {
-        var token = Token(session.Csrf);
-        var accountRows = new StringBuilder();
-        foreach (var row in rows)
-        {
-            var a = row.Account;
-            var state = a.HasPassword ? $"{a.Devices} device{(a.Devices == 1 ? "" : "s")}" : a.SignupCode != null ? "signed up, no password yet" : "no password";
-            var backup = row.Versions == 0 ? "no backup" : $"{row.Versions} version{(row.Versions == 1 ? "" : "s")}, {Mib(row.Bytes)}, last {row.Last:yyyy-MM-dd HH:mm}";
-            accountRows.Append($"""
-                <tr><td>{E(a.Name)}{(a.IsAdmin ? " <strong>(admin)</strong>" : "")}</td><td>{a.Created:yyyy-MM-dd}</td><td>{E(state)}</td><td>{E(backup)}</td><td>{E(a.Pass)}{(a.SignupCode != null ? $" (code {E(a.SignupCode)})" : "")}</td>
-                <td><form method="post" action="/admin/accounts/password">{token}<input type="hidden" name="name" value="{E(a.Name)}"><button type="submit">Reset password</button></form>
-                <a href="/admin/accounts/remove?name={Uri.EscapeDataString(a.Name)}">Remove…</a></td></tr>
-                """);
-        }
-
-        var codeRows = new StringBuilder();
-        foreach (var c in codes.OrderByDescending(c => c.Created))
-        {
-            var status = c.Problem(now) ?? "works";
-            var who = c.Uses.Count == 0 ? "" : string.Join(", ", c.Uses.Select(u => u.Email));
-            codeRows.Append($"""
-                <tr><td><code>{E(c.Id)}</code></td><td>{E(c.Note)}</td><td>{E(status)}</td><td>{c.Uses.Count}{(c.MaxUses is { } max ? " of " + max : "")}</td><td>{(c.Expires is { } end ? end.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : "never")}</td><td>{E(who)}</td>
-                <td>{(c.Revoked ? "" : $"<form method=\"post\" action=\"/admin/codes/revoke\">{token}<input type=\"hidden\" name=\"id\" value=\"{E(c.Id)}\"><button type=\"submit\" class=\"danger\">Revoke</button></form>")}</td></tr>
-                """);
-        }
-
-        var devices = rows.Sum(r => r.Account.Devices);
-        var bytes = rows.Sum(r => r.Bytes);
-        var disk = diskFree is { } f && diskTotal is { } t ? $", {Gib(f)} free of {Gib(t)} on the disk" : "";
-        return Pages.Page("Admin", $"""
-            <h1>Admin</h1>
-            <p class="muted">Signed in as {E(session.User)}. <form method="post" action="/admin/logout" class="inline" style="display:inline">{token}<button type="submit">Sign out</button></form></p>
-            <p>{rows.Count} account{(rows.Count == 1 ? "" : "s")}, {devices} device{(devices == 1 ? "" : "s")} signed in, {Mib(bytes)} of backups{E(disk)}.</p>
-
-            <h2>Accounts</h2>
-            <table>
-            <tr><th>Account</th><th>Made</th><th>State</th><th>Backup</th><th>Pass</th><th></th></tr>
-            {accountRows}
-            </table>
-            <form method="post" action="/admin/accounts/add" class="inline">
-            {token}
-            <label for="email">Add an account by email address (a password is made up and shown once)</label>
-            <input id="email" name="email" type="email" autocapitalize="none" spellcheck="false" maxlength="254" required> <button type="submit">Add</button>
-            </form>
-
-            <h2>Signup codes</h2>
-            <table>
-            <tr><th>Id</th><th>Note</th><th>Status</th><th>Used</th><th>Until</th><th>Signed up</th><th></th></tr>
-            {codeRows}
-            </table>
-            <form method="post" action="/admin/codes/add" class="inline">
-            {token}
-            <label for="note">Make a code: who it is for</label>
-            <input id="note" name="note" maxlength="100">
-            <label for="uses">How many people (empty for any number)</label>
-            <input id="uses" name="uses" inputmode="numeric" maxlength="6">
-            <label for="days">How many days it works (empty for no end)</label>
-            <input id="days" name="days" inputmode="numeric" maxlength="4">
-            <button type="submit">Make a code and its link</button>
-            </form>
-            """, wide: true);
     }
 }

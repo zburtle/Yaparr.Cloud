@@ -124,14 +124,14 @@ public sealed class PostgresServiceTests : ServiceTest, IDisposable
     }
 
     [SkippableFact]
-    public void Two_copies_of_the_service_starting_at_once_make_the_schema_once()
+    public void Two_copies_of_the_service_starting_at_once_make_each_schema_version_once()
     {
         var sources = Enumerable.Range(0, 6).Select(_ => Npgsql.NpgsqlDataSource.Create(_database.ConnectionString)).ToList();
         try
         {
             Parallel.ForEach(sources, PostgresDatabase.Migrate);
             using var count = sources[0].CreateCommand("select count(*) from schema_version");
-            Assert.Equal(1L, Convert.ToInt64(count.ExecuteScalar()));
+            Assert.Equal((long)PostgresDatabase.SchemaVersion, Convert.ToInt64(count.ExecuteScalar()));
         }
         finally { foreach (var s in sources) s.Dispose(); }
     }

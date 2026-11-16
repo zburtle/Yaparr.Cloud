@@ -31,12 +31,16 @@ services:
       Service__S3SecretKey: "${S3_SECRET_KEY:-}"
       Service__S3Region: "${S3_REGION:-auto}"
       Service__S3ConditionalWrites: "${S3_CONDITIONAL_WRITES:-true}"   # false for a store that does not take If-None-Match
+      # Push notifications through Firebase: the path, inside the container, of the service account key (README, "Push notifications"). Mount the file read-only
+      # under volumes below, outside the repository. Empty: only UnifiedPush works.
+      Service__PushFcmServiceAccountFile: "${PUSH_FCM_SERVICE_ACCOUNT_FILE:-}"
       # Service__KeepVersions: "3"      # the newest versions always kept ...
       # Service__KeepDays: "7"          # ... and the newest of each of this many days
       # Service__WritesPerHour: "12"
       # Service__RequestsPerMinute: "120"
     volumes:
       - cloud-data:/data                     # the accounts, the signup codes and every backup: this is what to back up
+      - ${PUSH_FCM_SERVICE_ACCOUNT_HOST_FILE:-/dev/null}:/run/secrets/fcm.json:ro   # the Firebase key, kept on the host outside the repository (set both PUSH_FCM_ variables in .env)
     depends_on:
       postgres:
         condition: service_healthy

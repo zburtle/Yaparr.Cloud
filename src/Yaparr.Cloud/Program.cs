@@ -24,6 +24,13 @@ builder.Services.AddSingleton(options);
 builder.Services.AddSingleton<IBackupStore>(_ => Stores.Backups(options));
 builder.Services.AddSingleton<IAccounts>(_ => Stores.Accounts(options));
 builder.Services.AddSingleton<ISignupCodes>(_ => Stores.Codes(options));
+builder.Services.AddSingleton<IPushRegistry>(_ => Stores.Push(options));
+builder.Services.AddSingleton<IPushSender>(_ =>
+{
+    var http = PushHttp.CreateSafeClient();
+    return new PushSender(http, FcmClient.FromFile(options.PushFcmServiceAccountFile, new HttpClient { Timeout = TimeSpan.FromSeconds(10) }));
+});
+builder.Services.AddSingleton<WakeLimiter>();
 builder.Services.AddSingleton<WriteLimiter>();
 builder.Services.AddSingleton<LoginFlow>();
 builder.Services.AddSingleton<SignInHandoff>();
@@ -194,6 +201,10 @@ app.MapPost("/account/setup", async (HttpContext http, IAccounts accounts, SignI
 // ---- the admin portal, for the person running the service (see AdminPortal) ----
 
 app.MapAdminPortal(options);
+
+// ---- waking phones for push notifications (see PushApi) ----
+
+app.MapPush(options);
 
 // ---- the backup, for an app that is signed in (Authorization: Bearer <token>) ----
 

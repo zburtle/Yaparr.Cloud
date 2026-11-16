@@ -7,11 +7,12 @@ using Yaparr.Cloud;
 
 // "accounts ...", "codes ..." and "backups ..." look after who may use the service and where its backups are kept, and then exit; anything else runs the service.
 if (args.Length > 0 && (args[0].Equals("accounts", StringComparison.OrdinalIgnoreCase) || args[0].Equals("codes", StringComparison.OrdinalIgnoreCase)
-                        || args[0].Equals("backups", StringComparison.OrdinalIgnoreCase)))
+                        || args[0].Equals("backups", StringComparison.OrdinalIgnoreCase) || args[0].Equals("dumps", StringComparison.OrdinalIgnoreCase)))
 {
     var config = new ConfigurationBuilder().SetBasePath(AppContext.BaseDirectory).AddJsonFile("appsettings.json", optional: true).AddEnvironmentVariables().Build();
     var settings = config.GetSection("Service").Get<ServiceOptions>() ?? new ServiceOptions();
     if (args[0].Equals("backups", StringComparison.OrdinalIgnoreCase)) return await AdminCommands.RunBackupsAsync(args[1..], settings, Console.Out);
+    if (args[0].Equals("dumps", StringComparison.OrdinalIgnoreCase)) return await AdminCommands.RunDumpsAsync(args[1..], settings, Console.Out, Console.OpenStandardInput(), Console.OpenStandardOutput());
     return args[0].Equals("codes", StringComparison.OrdinalIgnoreCase)
         ? await AdminCommands.RunCodesAsync(args[1..], settings, Console.Out)
         : await AdminCommands.RunAsync(args[1..], settings, Console.Out);

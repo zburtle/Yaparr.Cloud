@@ -10,7 +10,7 @@ namespace Yaparr.Cloud;
 public static class PostgresDatabase
 {
     /// <summary>The version of the schema this build makes and expects. A database from a newer build is refused rather than damaged.</summary>
-    public const int SchemaVersion = 2;
+    public const int SchemaVersion = 3;
 
     private static readonly object Gate = new();
     private static readonly Dictionary<string, NpgsqlDataSource> Sources = new();
@@ -116,6 +116,31 @@ public static class PostgresDatabase
                 insert into schema_version (version) values (2);
                 """, connection, transaction);
             v2.ExecuteNonQuery();
+        }
+        if (current < 3)
+        {
+            using var v3 = new NpgsqlCommand("""
+                create table sync_records (
+                    account text not null,
+                    kind text not null,
+                    id text not null,
+                    clock text not null,
+                    device text not null,
+                    deleted boolean not null,
+                    body text not null,
+                    cursor bigint not null,
+                    primary key (account, kind, id)
+                );
+                create index sync_records_cursor on sync_records (account, cursor);
+
+                create table sync_cursors (
+                    account text primary key,
+                    counter bigint not null
+                );
+
+                insert into schema_version (version) values (3);
+                """, connection, transaction);
+            v3.ExecuteNonQuery();
         }
         transaction.Commit();
     }

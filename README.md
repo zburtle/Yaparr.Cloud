@@ -96,13 +96,30 @@ The pages are plain HTML with no scripts, are never cached or framed, and everyt
 | `GET /v1/backup[?version=n]` | | the backup; `X-Yaparr-Version` says which; `404` if none |
 | `GET /v1/backup/versions` | | `{username, versions:[{version,size,at}]}`, newest first |
 | `DELETE /v1/backup` | | `204`; `404` if none |
+| `GET /v1/push/options` | | `{unifiedPush, fcm}`: which ways of waking a phone this service has |
+| `PUT /v1/push` | `Bearer`; `{deviceId, kind: "unifiedpush"\|"fcm", endpoint}` | `201 {token}` for a new device (the wake token, shown once); `200 {token:null}` for one already registered; `409` at the device limit |
+| `GET /v1/push` | `Bearer` | `{devices:[{deviceId,kind,created}]}` (no tokens, no addresses) |
+| `POST /v1/push/{deviceId}/rotate` | `Bearer` | `{token}`, a new wake token; the old one stops at once |
+| `DELETE /v1/push/{deviceId}` | `Bearer` | `204` |
+| `POST /v1/push/wake/{token}` | no account | `202` sent; `404` no such token; `410` the push service says the device is gone (it is forgotten); `429` too often; `502` could not send |
 | `GET /healthz` | | `200` |
 
 Everything under `/v1/backup` needs `Authorization: Bearer <token>`; without a token the service gave out, the answer is `401`. `If-Match` is what keeps two devices from overwriting each other, and also makes a replayed upload a `409` instead of a second copy.
 
+### Push notifications (`PushApi`)
+
+Yaparr's messages go from phone to phone and never pass through this service, so it cannot know that one is waiting. What it can do is **wake a phone**: the person sending finds that the other is not connected and asks this service to wake them, with a **wake token** the other person gave to the people in their rooms (inside the room, where this service never looks). The service sends a push with nothing in it (`{"t":"wake"}`) and forgets it; the phone starts, connects and picks up what it missed. **The sender needs no account here; the person who is woken does**, because only a signed-in device can register.
+
+- **Registering** (`PUT /v1/push`, signed in): a device says how it is woken, through **UnifiedPush** (an https address that the phone's distributor app gave it, such as ntfy) or **Firebase Cloud Messaging** (a device token, only when the service has a service account). A new device is given its wake token once; only a hash is kept (like sign-in tokens). Re-registering changes where it is woken and keeps the token. `rotate` makes a new token and cuts off everyone who had the old one. An account may have `PushMaxPerAccount` (5) devices.
+- **Waking** (`POST /v1/push/wake/{token}`): the token is the permission. A token that does not exist, or whose account was removed, answers `404`. A token may be used `PushWakesPerMinute` (6) times a minute and `PushWakesPerDay` (200) a day, so the person who would make a phone buzz all night is stopped, and the cap also bounds what the service sends. The answer tells the sender when the device is gone (`410`), and the registration is forgotten.
+- **The service sends only to addresses that are safe to send to.** A UnifiedPush address must be https, a name (not a number), a port of 443 or 1024 and up, with no password in it, and it is checked again when connected to: the service resolves the name itself, refuses loopback, private, link-local and carrier-grade addresses, makes the connection to the address it checked, does not follow redirects, and gives up after 10 seconds (`PushHttp`, `PushEndpoints`). Otherwise a signed-in person could aim the service at the machine's own network.
+- **Firebase.** Download a service account key from the Firebase console (Project settings, Service accounts), keep it out of the repository, readable only by the service, and set `Service__PushFcmServiceAccountFile` to its path inside the container (mount it as a volume or a secret). Without it only UnifiedPush works and `GET /v1/push/options` says so. The service trades a signed request for an access token (kept until it runs out) and sends a high priority message with data and no notification (`FcmClient`); a `404` from Firebase means the token is not registered any more.
+- **Storage:** `IPushRegistry`, in the database (`push_registrations`, schema version 2) or in `push.json` in the data folder, held to the same behaviour by the same tests (`StoreContractTests`).
+- **Not checked against the real services yet:** the UnifiedPush POST and the Firebase calls are tested with a fake server; no distributor and no Firebase project has received one from this code.
+
 ### Limits (`appsettings.json`, section `Service`, or `Service__Name` environment variables)
 
-`MaxBlobBytes` (512 MiB), `KeepVersions` (3) and `KeepDays` (7), `RequestsPerMinute` per address (120), `WritesPerHour` per account (12), `DataDirectory` (`data`), `PublicUrl` (`https://cloud.yaparr.com`), `SignupPageUrl` (`https://yaparr.com/signup`), `BehindProxy`.
+`MaxBlobBytes` (512 MiB), `KeepVersions` (3) and `KeepDays` (7), `RequestsPerMinute` per address (120), `WritesPerHour` per account (12), `DataDirectory` (`data`), `PublicUrl` (`https://cloud.yaparr.com`), `SignupPageUrl` (`https://yaparr.com/signup`), `BehindProxy`, and for push notifications `PushWakesPerMinute`, `PushWakesPerDay`, `PushMaxPerAccount` and `PushFcmServiceAccountFile`.
 
 Set `BehindProxy` to `true` only when a reverse proxy is in front (it should be, for https): then the caller's address comes from `X-Forwarded-For`. Left on without a proxy, anyone can claim any address.
 

@@ -68,6 +68,21 @@ public sealed class ServiceOptions
     /// <summary>The page on the website where people sign up with a code. The link the admin sends is this address with the server and the code after a <c>#</c>.</summary>
     public string SignupPageUrl { get; set; } = "https://yaparr.com/signup";
 
+    /// <summary>
+    /// The Firebase service account key (the JSON file downloaded from the Firebase console) that lets this service wake phones that use Firebase Cloud Messaging.
+    /// Without one only UnifiedPush works. Keep the file out of the repository and readable only by the service.
+    /// </summary>
+    public string PushFcmServiceAccountFile { get; set; } = "";
+
+    /// <summary>How many times one wake token may be used in a minute (6).</summary>
+    public int PushWakesPerMinute { get; set; } = 6;
+
+    /// <summary>And in a day (200).</summary>
+    public int PushWakesPerDay { get; set; } = 200;
+
+    /// <summary>How many devices of one account may be registered for push notifications (5).</summary>
+    public int PushMaxPerAccount { get; set; } = 5;
+
     /// <summary>True when a reverse proxy sits in front (which is how it gets https), so the caller's address is read from <c>X-Forwarded-For</c>. Leave it off when the service is reachable directly, or anyone could claim any address.</summary>
     public bool BehindProxy { get; set; }
 

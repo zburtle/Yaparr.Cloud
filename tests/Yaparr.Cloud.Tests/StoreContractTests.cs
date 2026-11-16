@@ -49,6 +49,8 @@ public abstract class StoreContractTests : IDisposable
 
     protected abstract ISignupCodes NewCodes(Func<DateTimeOffset>? now = null);
 
+    protected abstract IPushRegistry NewPush();
+
     public virtual void Dispose() { }
 
     // ---- accounts ----
@@ -413,6 +415,93 @@ public abstract class StoreContractTests : IDisposable
         Assert.Equal(now, list[0].Uses.Single().At);
         Assert.Equal(new DateTimeOffset(2026, 11, 15, 9, 0, 0, TimeSpan.Zero), list[0].Created);
     }
+
+    // ---- push registrations ----
+
+    [SkippableFact]
+    public void A_device_is_registered_once_and_keeps_its_token_when_it_registers_again()
+    {
+        var push = NewPush();
+        var first = push.Register("sam@example.com", "phone", PushKind.UnifiedPush, "https://push.example.org/up/abc", 5);
+        Assert.Equal(PushRegisterOutcome.Created, first.Outcome);
+        Assert.True(WakeTokens.Looks(first.Token));
+
+        var again = push.Register("sam@example.com", "phone", PushKind.Fcm, "device-token", 5);
+        Assert.Equal(PushRegisterOutcome.Updated, again.Outcome);
+        Assert.Null(again.Token);
+        var found = push.Find(first.Token)!;
+        Assert.Equal(("sam@example.com", "phone", PushKind.Fcm, "device-token"), (found.Account, found.DeviceId, found.Kind, found.Endpoint));
+        Assert.Single(push.List("sam@example.com"));
+    }
+
+    [SkippableFact]
+    public void Only_a_hash_of_the_token_is_kept_and_an_unknown_or_odd_token_leads_nowhere()
+    {
+        var push = NewPush();
+        var token = push.Register("sam@example.com", "phone", PushKind.UnifiedPush, "https://push.example.org/up/abc", 5).Token!;
+        Assert.NotNull(push.Find(token));
+        Assert.Null(push.Find(WakeTokens.Make()));
+        Assert.Null(push.Find(null));
+        Assert.Null(push.Find(""));
+        Assert.Null(push.Find(token + "x"));
+        Assert.Null(push.Find("' or 1=1 --"));
+    }
+
+    [SkippableFact]
+    public void An_account_may_register_only_so_many_devices_and_one_account_does_not_use_up_anothers()
+    {
+        var push = NewPush();
+        for (int i = 0; i < 3; i++) Assert.Equal(PushRegisterOutcome.Created, push.Register("sam@example.com", "d" + i, PushKind.UnifiedPush, "https://push.example.org/" + i, 3).Outcome);
+        Assert.Equal(PushRegisterOutcome.TooMany, push.Register("sam@example.com", "d3", PushKind.UnifiedPush, "https://push.example.org/3", 3).Outcome);
+        Assert.Equal(PushRegisterOutcome.Updated, push.Register("sam@example.com", "d1", PushKind.UnifiedPush, "https://push.example.org/new", 3).Outcome);
+        Assert.Equal(PushRegisterOutcome.Created, push.Register("pat@example.com", "d0", PushKind.UnifiedPush, "https://push.example.org/p", 3).Outcome);
+        Assert.Equal(3, push.List("sam@example.com").Count);
+    }
+
+    [SkippableFact]
+    public void A_new_token_makes_the_old_one_stop_and_a_removed_device_cannot_be_woken()
+    {
+        var push = NewPush();
+        var old = push.Register("sam@example.com", "phone", PushKind.UnifiedPush, "https://push.example.org/up/abc", 5).Token!;
+        var fresh = push.Rotate("sam@example.com", "phone")!;
+        Assert.NotEqual(old, fresh);
+        Assert.Null(push.Find(old));
+        Assert.NotNull(push.Find(fresh));
+        Assert.Null(push.Rotate("sam@example.com", "nothing"));
+        Assert.Null(push.Rotate("pat@example.com", "phone"));
+
+        Assert.False(push.Remove("pat@example.com", "phone"));
+        Assert.True(push.Remove("sam@example.com", "phone"));
+        Assert.Null(push.Find(fresh));
+        Assert.False(push.Remove("sam@example.com", "phone"));
+    }
+
+    [SkippableFact]
+    public void A_token_can_be_forgotten_by_itself_and_an_account_forgotten_with_all_its_devices()
+    {
+        var push = NewPush();
+        var a = push.Register("sam@example.com", "a", PushKind.UnifiedPush, "https://push.example.org/a", 5).Token!;
+        push.Register("sam@example.com", "b", PushKind.UnifiedPush, "https://push.example.org/b", 5);
+        var other = push.Register("pat@example.com", "a", PushKind.UnifiedPush, "https://push.example.org/c", 5).Token!;
+        Assert.True(push.RemoveByToken(a));
+        Assert.False(push.RemoveByToken(a));
+        Assert.Single(push.List("sam@example.com"));
+        push.RemoveAccount("sam@example.com");
+        Assert.Empty(push.List("sam@example.com"));
+        Assert.NotNull(push.Find(other));
+    }
+
+    [SkippableFact]
+    public void The_list_shows_devices_and_what_they_use_but_never_a_token_or_an_address()
+    {
+        var push = NewPush();
+        var now = new DateTimeOffset(2026, 11, 16, 9, 0, 0, TimeSpan.Zero);
+        push.Register("sam@example.com", "phone", PushKind.Fcm, "secret-device-token", 5);
+        var listed = push.List("sam@example.com").Single();
+        Assert.Equal(("phone", PushKind.Fcm), (listed.DeviceId, listed.Kind));
+        Assert.DoesNotContain("secret", listed.ToString());
+        Assert.True(listed.Created > now - TimeSpan.FromDays(3650));
+    }
 }
 
 /// <summary>The stores that keep accounts and codes in files.</summary>
@@ -425,6 +514,8 @@ public sealed class FileStoreTests : StoreContractTests
     protected override IAccounts NewAccounts() => new AccountDirectory(Options);
 
     protected override ISignupCodes NewCodes(Func<DateTimeOffset>? now = null) => new SignupCodes(Options, now ?? (() => DateTimeOffset.UtcNow));
+
+    protected override IPushRegistry NewPush() => new PushRegistry(Options);
 
     public override void Dispose() { try { Directory.Delete(_dir, true); } catch (IOException) { } }
 }
@@ -444,6 +535,8 @@ public sealed class PostgresStoreTests : StoreContractTests
     protected override IAccounts NewAccounts() => Stores.Accounts(Options);
 
     protected override ISignupCodes NewCodes(Func<DateTimeOffset>? now = null) => Stores.Codes(Options, now ?? (() => DateTimeOffset.UtcNow));
+
+    protected override IPushRegistry NewPush() => Stores.Push(Options);
 
     public override void Dispose() => _database.Dispose();
 

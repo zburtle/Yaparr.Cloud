@@ -32,6 +32,8 @@ public static class Stores
 
     public static IAccounts Accounts(ServiceOptions options) => options.Database.Length > 0 ? new PostgresAccounts(Source(options)) : new AccountDirectory(options);
 
+    public static IPushRegistry Push(ServiceOptions options) => options.Database.Length > 0 ? new PostgresPushRegistry(Source(options)) : new PushRegistry(options);
+
     public static ISignupCodes Codes(ServiceOptions options) => Codes(options, () => DateTimeOffset.UtcNow);
 
     internal static ISignupCodes Codes(ServiceOptions options, Func<DateTimeOffset> now) =>

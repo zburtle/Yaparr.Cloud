@@ -83,6 +83,18 @@ public sealed class ServiceOptions
     /// <summary>How many devices of one account may be registered for push notifications (5).</summary>
     public int PushMaxPerAccount { get; set; } = 5;
 
+    /// <summary>How many synced records one account may hold (2000). Deleted records are kept as markers and count too.</summary>
+    public int SyncMaxRecords { get; set; } = 2000;
+
+    /// <summary>The longest body of one synced record, in base64 characters (65536, about 48 KB locked).</summary>
+    public int SyncMaxRecordBytes { get; set; } = 65536;
+
+    /// <summary>How many times one account may send synced records in a minute (30).</summary>
+    public int SyncWritesPerMinute { get; set; } = 30;
+
+    /// <summary>And in a day (5000).</summary>
+    public int SyncWritesPerDay { get; set; } = 5000;
+
     /// <summary>True when a reverse proxy sits in front (which is how it gets https), so the caller's address is read from <c>X-Forwarded-For</c>. Leave it off when the service is reachable directly, or anyone could claim any address.</summary>
     public bool BehindProxy { get; set; }
 

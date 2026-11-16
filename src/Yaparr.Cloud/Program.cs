@@ -25,6 +25,7 @@ builder.Services.AddSingleton<IBackupStore>(_ => Stores.Backups(options));
 builder.Services.AddSingleton<IAccounts>(_ => Stores.Accounts(options));
 builder.Services.AddSingleton<ISignupCodes>(_ => Stores.Codes(options));
 builder.Services.AddSingleton<IPushRegistry>(_ => Stores.Push(options));
+builder.Services.AddSingleton<ISyncStore>(_ => Stores.Sync(options));
 builder.Services.AddSingleton<IPushSender>(_ =>
 {
     var http = PushHttp.CreateSafeClient();
@@ -205,6 +206,7 @@ app.MapAdminPortal(options);
 // ---- waking phones for push notifications (see PushApi) ----
 
 app.MapPush(options);
+app.MapSync(options);
 
 // ---- the backup, for an app that is signed in (Authorization: Bearer <token>) ----
 

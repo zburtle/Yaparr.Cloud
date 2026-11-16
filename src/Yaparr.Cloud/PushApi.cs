@@ -133,11 +133,11 @@ internal static class PushApi
         });
     }
 
-    private static string? Bearer(HttpContext http)
+    internal static string? Bearer(HttpContext http)
     {
         var header = http.Request.Headers.Authorization.ToString();
         return header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? header[7..].Trim() : null;
     }
 
-    private static IResult Problem(int status, string message) => Results.Json(new { error = message }, statusCode: status);
+    internal static IResult Problem(int status, string message) => Results.Json(new { error = message }, statusCode: status);
 }

@@ -34,6 +34,8 @@ public static class Stores
 
     public static IPushRegistry Push(ServiceOptions options) => options.Database.Length > 0 ? new PostgresPushRegistry(Source(options)) : new PushRegistry(options);
 
+    public static ISyncStore Sync(ServiceOptions options) => options.Database.Length > 0 ? new PostgresSyncStore(Source(options)) : new SyncStore(options);
+
     public static ISignupCodes Codes(ServiceOptions options) => Codes(options, () => DateTimeOffset.UtcNow);
 
     internal static ISignupCodes Codes(ServiceOptions options, Func<DateTimeOffset> now) =>

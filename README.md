@@ -102,6 +102,8 @@ The pages are plain HTML with no scripts, are never cached or framed, and everyt
 | `POST /v1/push/{deviceId}/rotate` | `Bearer` | `{token}`, a new wake token; the old one stops at once |
 | `DELETE /v1/push/{deviceId}` | `Bearer` | `204` |
 | `POST /v1/push/wake/{token}` | no account | `202` sent; `404` no such token; `410` the push service says the device is gone (it is forgotten); `429` too often; `502` could not send |
+| `GET /v1/sync[?since=n&limit=k]` | `Bearer` | `{cursor, more, records:[{kind,id,clock,device,deleted,body,cursor}]}`: the records changed after cursor `n` (0 for all), oldest change first, at most 100; `cursor` is where to ask next |
+| `PUT /v1/sync` | `Bearer`; `{records:[{kind,id,clock,device,deleted,body}]}` (1 to 100) | `{cursor, stale:["kind/id"]}`; a record whose clock is not newer than the one held is named in `stale` and not taken; `400` for a bad record (nothing is stored), `409` past the account's record limit, `429` too often |
 | `GET /healthz` | | `200` |
 
 Everything under `/v1/backup` needs `Authorization: Bearer <token>`; without a token the service gave out, the answer is `401`. `If-Match` is what keeps two devices from overwriting each other, and also makes a replayed upload a `409` instead of a second copy.
@@ -118,9 +120,20 @@ Yaparr's messages go from phone to phone and never pass through this service, so
 - **Logging:** a wake-up request logs its outcome and nothing else (`wake: sent (fcm)`, `wake: gone (unifiedpush)`, `wake: failed (fcm)`, `wake: limited`, `wake: no such token`), so that the log can say whether wake-ups work. It never holds a wake token, an account, a device id, a push address, an IP address or who asked; a test (`PushApiTests`) checks that. The web server's own request logging is off, and the proxy keeps no access log.
 - **Not checked against the real services yet:** the UnifiedPush POST and the Firebase calls are tested with a fake server; no distributor and no Firebase project has received one from this code.
 
+### Synced state (`SyncApi`)
+
+What an account should have the same on all its devices (a room joined and its key, the name, a block) is kept as **records**, one for each thing, and the service hands out what changed since a device last asked. It never reads or merges them: the body of a record is locked by the devices (with a key made from the account's recovery code, so this service sees only ciphertext), and the devices do all the merging. What the service does decide is which write of a record is the newest.
+
+- **Record:** `{kind, id, clock, device, deleted, body}`. `kind` is lowercase letters, digits and `-` (`room`, `block`, `profile`), `id` is the thing's own name (up to 128 characters of letters, digits and `. _ - : @ + = / |`), `body` is base64 (at most `SyncMaxRecordBytes` characters; empty only when `deleted`), `device` is the id of the device that wrote it.
+- **Clock:** up to 96 characters of letters, digits and `. _ -`, made by the device so that plain text order is write order (a hybrid logical clock: the time, a counter, then the device id as a tiebreak). The service compares clocks as ordinary text, byte for byte, in the files and in the database alike (a test holds both to that), and takes a write only if its clock is greater than the held one. An equal clock is the same write sent again and is ignored; a lower one is named in `stale`.
+- **Cursor:** each stored change gets the account's next number (1, 2, 3…), so `GET /v1/sync?since=N` is exactly what changed after N. A device keeps the cursor it was given.
+- **Deleting:** a deleted record stays as a marker with no body, so a device that was away still learns of it, and a write older than the marker does not bring the record back. A later write with a higher clock (joining the room again) replaces the marker. Markers count against the limit.
+- **Limits:** `SyncMaxRecords` (2000 records and markers an account; a call that would pass it stores nothing), `SyncMaxRecordBytes` (65536), `SyncWritesPerMinute` (30) and `SyncWritesPerDay` (5000) an account.
+- **Storage:** `ISyncStore`, in the database (`sync_records`, `sync_cursors`, schema version 3) or as a file for each account in `sync` in the data folder, held to the same behaviour by the same tests (`SyncStoreContractTests`).
+
 ### Limits (`appsettings.json`, section `Service`, or `Service__Name` environment variables)
 
-`MaxBlobBytes` (512 MiB), `KeepVersions` (3) and `KeepDays` (7), `RequestsPerMinute` per address (120), `WritesPerHour` per account (12), `DataDirectory` (`data`), `PublicUrl` (`https://cloud.yaparr.com`), `SignupPageUrl` (`https://yaparr.com/signup`), `BehindProxy`, and for push notifications `PushWakesPerMinute`, `PushWakesPerDay`, `PushMaxPerAccount` and `PushFcmServiceAccountFile`.
+`MaxBlobBytes` (512 MiB), `KeepVersions` (3) and `KeepDays` (7), `RequestsPerMinute` per address (120), `WritesPerHour` per account (12), `DataDirectory` (`data`), `PublicUrl` (`https://cloud.yaparr.com`), `SignupPageUrl` (`https://yaparr.com/signup`), `BehindProxy`, and for push notifications `PushWakesPerMinute`, `PushWakesPerDay`, `PushMaxPerAccount` and `PushFcmServiceAccountFile`, and for synced state `SyncMaxRecords`, `SyncMaxRecordBytes`, `SyncWritesPerMinute` and `SyncWritesPerDay`.
 
 Set `BehindProxy` to `true` only when a reverse proxy is in front (it should be, for https): then the caller's address comes from `X-Forwarded-For`. Left on without a proxy, anyone can claim any address.
 

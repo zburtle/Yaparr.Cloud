@@ -40,6 +40,7 @@ services:
       # Service__RequestsPerMinute: "120"
     volumes:
       - cloud-data:/data                     # the accounts, the signup codes and every backup: this is what to back up
+      - ${PUSH_FCM_SERVICE_ACCOUNT_HOST_FILE:-/dev/null}:/run/secrets/fcm.json:ro   # the Firebase key, kept on the host outside the repository (set both PUSH_FCM_ variables in .env)
     depends_on:
       postgres:
         condition: service_healthy

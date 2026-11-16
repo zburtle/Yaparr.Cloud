@@ -97,18 +97,32 @@ internal static class PushApi
         });
 
         // Asking for a wake-up. No account: the token is the permission. It answers the same for a token that does not exist as for one that does not lead anywhere.
-        push.MapPost("/wake/{token}", async (IAccounts accounts, IPushRegistry registry, IPushSender sender, WakeLimiter limiter, string token, CancellationToken cancel) =>
+        // What is logged is only the outcome, and the way (fcm or unifiedpush) when there was a target: never a token, an account, a device, an address or who asked,
+        // so that the log can tell whether wake-ups work without telling anything about anyone.
+        push.MapPost("/wake/{token}", async (IAccounts accounts, IPushRegistry registry, IPushSender sender, WakeLimiter limiter, ILoggerFactory logs, string token, CancellationToken cancel) =>
         {
-            if (registry.Find(token) is not { } target) return Problem(StatusCodes.Status404NotFound, "Nobody to wake.");
+            var log = logs.CreateLogger("Yaparr.Cloud.Push");
+            if (registry.Find(token) is not { } target)
+            {
+                log.LogInformation("wake: no such token");
+                return Problem(StatusCodes.Status404NotFound, "Nobody to wake.");
+            }
+            string way = target.Kind == PushKind.Fcm ? "fcm" : "unifiedpush";
             if (!accounts.Exists(target.Account))
             {
                 registry.RemoveAccount(target.Account);
+                log.LogInformation("wake: no account any more ({Way})", way);
                 return Problem(StatusCodes.Status404NotFound, "Nobody to wake.");
             }
             if (!limiter.TryTake(token, options.PushWakesPerMinute, options.PushWakesPerDay))
+            {
+                log.LogInformation("wake: limited ({Way})", way);
                 return Problem(StatusCodes.Status429TooManyRequests, "That device has been woken a lot lately. Try again later.");
+            }
 
-            switch (await sender.SendAsync(target, cancel))
+            var result = await sender.SendAsync(target, cancel);
+            log.LogInformation("wake: {Result} ({Way})", result.ToString().ToLowerInvariant(), way);
+            switch (result)
             {
                 case PushResult.Sent: return Results.StatusCode(StatusCodes.Status202Accepted);
                 case PushResult.Gone:

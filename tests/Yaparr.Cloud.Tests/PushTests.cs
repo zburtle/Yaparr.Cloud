@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Yaparr.Cloud;
 
 namespace Yaparr.Cloud.Tests;
@@ -19,6 +20,24 @@ internal sealed class FakePushSender : IPushSender
     {
         Sent.Add(target);
         return Task.FromResult(Answer);
+    }
+}
+
+/// <summary>Keeps what is logged, so a test can look at it.</summary>
+internal sealed class LogCapture : ILoggerProvider
+{
+    public List<string> Lines { get; } = new();
+    public ILogger CreateLogger(string categoryName) => new Capture(this);
+    public void Dispose() { }
+
+    private sealed class Capture(LogCapture owner) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            lock (owner.Lines) owner.Lines.Add(formatter(state, exception));
+        }
     }
 }
 
@@ -69,6 +88,29 @@ public sealed class PushApiTests : ServiceTest
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
         var sent = Assert.Single(_sender.Sent);
         Assert.Equal(("sam@example.com", PushKind.UnifiedPush, "https://ntfy.example.org/upabc"), (sent.Account, sent.Kind, sent.Endpoint));
+    }
+
+    [Fact]
+    public async Task A_wake_is_logged_by_its_outcome_alone_and_nothing_about_anyone()
+    {
+        var logs = new LogCapture();
+        var client = Start(null, services =>
+        {
+            foreach (var d in services.Where(d => d.ServiceType == typeof(IPushSender)).ToList()) services.Remove(d);
+            services.AddSingleton<IPushSender>(_sender);
+            services.AddSingleton<ILoggerProvider>(logs);
+        });
+        var token = Register("sam@example.com");
+        var wake = await RegisterDevice(client, token, deviceId: "sams-phone", endpoint: "https://ntfy.example.org/upabc");
+        await client.PostAsync("/v1/push/wake/" + wake, null);
+        await client.PostAsync("/v1/push/wake/" + WakeTokens.Make(), null);
+
+        string all;
+        lock (logs.Lines) all = string.Join(" | ", logs.Lines);
+        Assert.Contains("wake: sent (unifiedpush)", all);
+        Assert.Contains("wake: no such token", all);
+        foreach (var private_ in new[] { wake, token, "sam@example.com", "sams-phone", "ntfy.example.org", "upabc" })
+            Assert.DoesNotContain(private_, all);
     }
 
     [Fact]

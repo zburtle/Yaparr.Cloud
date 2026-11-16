@@ -1,3 +1,5 @@
+using Amazon.Runtime;
+
 namespace Yaparr.Cloud;
 
 /// <summary>
@@ -26,6 +28,77 @@ public static class AdminCommands
         "Usage:\n" +
         "  backups copy-to-s3 [--dry-run]  copy the backup files in the data folder into the bucket (the S3 settings have to be set); it can be run again, a version already\n" +
         "                                  there is left alone, and nothing is removed from the data folder\n";
+
+    public const string DumpsUsage =
+        "Usage:\n" +
+        "  dumps upload <yaparr-YYYY-MM-DD.sql.gz>   put a dump, read from standard input, in the bucket's dumps folder (what scripts/pg-backup.sh does)\n" +
+        "  dumps list                               the dumps in the bucket, newest first\n" +
+        "  dumps get <name>                         write a dump to standard output (docker compose exec -T cloud dotnet Yaparr.Cloud.dll dumps get <name> > file.sql.gz)\n" +
+        "  dumps prune [--days <n>]                 remove dumps made more than n days ago (30 unless told), never the newest\n";
+
+    /// <summary>
+    /// <c>dumps ...</c>: the daily dumps of the database in the bucket (see <see cref="DumpStore"/>). Exit codes: 0 done, 2 what was typed is not right, 3 no bucket is set (so
+    /// there is nothing to do, which a script may treat as fine), 1 anything else that went wrong.
+    /// </summary>
+    public static async Task<int> RunDumpsAsync(string[] args, ServiceOptions options, TextWriter output, Stream input, Stream data)
+    {
+        var command = args.FirstOrDefault()?.ToLowerInvariant();
+        if (command is not ("upload" or "list" or "get" or "prune")) { output.Write(DumpsUsage); return 2; }
+        if (options.S3Bucket.Length == 0 || options.S3Endpoint.Length == 0)
+        {
+            output.WriteLine("No bucket is set (Service__S3Bucket and Service__S3Endpoint), so the dumps stay on the machine.");
+            return 3;
+        }
+        using var s3 = S3BackupStore.CreateClient(options);
+        DumpStore store;
+        try { store = new DumpStore(s3, options); }
+        catch (ArgumentException ex) { output.WriteLine(ex.Message); return 2; }
+
+        try
+        {
+            switch (command)
+            {
+                case "upload":
+                {
+                    if (args.Length < 2) { output.Write(DumpsUsage); return 2; }
+                    var dump = await store.UploadAsync(args[1], input, CancellationToken.None);
+                    output.WriteLine($"Put {dump.Name} ({dump.Size / 1024.0:0.0} KiB) in the bucket.");
+                    return 0;
+                }
+                case "list":
+                {
+                    var all = await store.ListAsync(CancellationToken.None);
+                    if (all.Count == 0) output.WriteLine("No dumps in the bucket.");
+                    foreach (var d in all) output.WriteLine($"{d.Name}  {d.Size / 1024.0,9:0.0} KiB  {d.At:yyyy-MM-dd HH:mm} UTC");
+                    return 0;
+                }
+                case "get":
+                {
+                    if (args.Length < 2) { output.Write(DumpsUsage); return 2; }
+                    await using var stream = await store.OpenAsync(args[1], CancellationToken.None);
+                    if (stream == null) { output.WriteLine("There is no such dump in the bucket (dumps list shows them)."); return 1; }
+                    await stream.CopyToAsync(data);
+                    await data.FlushAsync();
+                    return 0;
+                }
+                default:
+                {
+                    int days = 30;
+                    var at = Array.IndexOf(args, "--days");
+                    if (at >= 0 && (at + 1 >= args.Length || !int.TryParse(args[at + 1], out days) || days < 1)) { output.WriteLine("--days takes a whole number of days, 1 or more."); return 2; }
+                    var removed = await store.PruneAsync(DateTimeOffset.UtcNow, days, CancellationToken.None);
+                    output.WriteLine(removed.Count == 0 ? $"Nothing older than {days} days." : $"Removed {removed.Count} dump{(removed.Count == 1 ? "" : "s")} older than {days} days: {string.Join(", ", removed)}.");
+                    return 0;
+                }
+            }
+        }
+        catch (ArgumentException ex) { output.WriteLine(ex.Message); return 2; }
+        catch (Exception ex) when (ex is AmazonServiceException or AmazonClientException or HttpRequestException or IOException)
+        {
+            output.WriteLine("The bucket could not be used: " + ex.Message.Split('\n')[0].Trim());
+            return 1;
+        }
+    }
 
     /// <summary><c>backups copy-to-s3</c>: moves a service that kept its backups as files over to an S3-compatible store (see <see cref="BackupCopy"/>).</summary>
     public static async Task<int> RunBackupsAsync(string[] args, ServiceOptions options, TextWriter output)

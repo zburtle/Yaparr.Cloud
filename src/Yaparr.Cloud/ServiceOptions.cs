@@ -45,6 +45,12 @@ public sealed class ServiceOptions
     public string S3Prefix { get; set; } = "backups/";
 
     /// <summary>
+    /// The folder in the bucket for the daily dumps of the database (<c>db-dumps/</c> by default), apart from the backups and not inside their folder, so pruning one can
+    /// never reach the other. See <see cref="DumpStore"/>.
+    /// </summary>
+    public string S3DumpPrefix { get; set; } = "db-dumps/";
+
+    /// <summary>
     /// Whether a save is put with <c>If-None-Match: *</c>, so that it only succeeds if nobody saved that version first (R2 and MinIO take it). Turn it off for
     /// a store that does not; the check made before the upload still stops two devices, only two copies of the service at once could then both save.
     /// </summary>

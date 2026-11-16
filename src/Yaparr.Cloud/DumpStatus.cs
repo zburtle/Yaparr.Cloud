@@ -14,7 +14,7 @@ public static class DumpStatus
     /// <summary>A dump older than this is a problem.</summary>
     public static readonly TimeSpan MaxAge = TimeSpan.FromDays(2);
 
-    private sealed record Dump(DateTimeOffset At, long Bytes, string? File);
+    private sealed record Dump(DateTimeOffset At, long Bytes, string? File, bool? Uploaded = null);
 
     public static StoreStatus Read(ServiceOptions options, DateTimeOffset now)
     {
@@ -29,8 +29,11 @@ public static class DumpStatus
             var size = dump.Bytes >= 1024 * 1024 ? (dump.Bytes / 1024.0 / 1024.0).ToString("0.0", CultureInfo.InvariantCulture) + " MiB" : Math.Max(1, dump.Bytes / 1024) + " KiB";
             var age = now - dump.At;
             var text = $"last {dump.At.UtcDateTime:yyyy-MM-dd HH:mm} UTC · {size}";
-            return age <= MaxAge ? new StoreStatus(kind, where, true, text)
-                : new StoreStatus(kind, where, false, text + $" · {(int)age.TotalDays} days ago");
+            // With a bucket set, a dump that did not get there is a problem too: it is what survives losing the machine.
+            var inBucket = options.S3Bucket.Length > 0;
+            if (inBucket) text += dump.Uploaded == true ? " · also in the bucket" : " · NOT copied to the bucket";
+            if (age > MaxAge) return new StoreStatus(kind, where, false, text + $" · {(int)age.TotalDays} days ago");
+            return new StoreStatus(kind, where, !inBucket || dump.Uploaded == true, text);
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
         {

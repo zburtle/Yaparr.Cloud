@@ -236,10 +236,14 @@ public static class AdminCommands
             {
                 if (rest.Count == 0) { output.Write(Usage); return 2; }
                 var name = AccountDirectory.Normalize(rest[0]);
-                if (name == null || !accounts.Remove(name)) { output.WriteLine("There is no such account."); return 1; }
+                var keep = rest.Contains("--keep-backup");
+                // The devices registered to be woken and the synced records go with the account.
+                var erased = name == null ? (Existed: false, HadBackup: false)
+                    : await AccountErasure.EraseAsync(name, accounts, store, Stores.Push(options), Stores.Sync(options), keep);
+                if (!erased.Existed) { output.WriteLine("There is no such account."); return 1; }
                 output.WriteLine($"Removed the account {name}.");
-                if (rest.Contains("--keep-backup")) output.WriteLine("Its backup was kept. Making an account with the same name again reaches it.");
-                else output.WriteLine(await store.DeleteAsync(BackupStore.FolderOf(name), CancellationToken.None) ? "Its backup was deleted." : "It had no backup.");
+                if (keep) output.WriteLine("Its backup was kept. Making an account with the same name again reaches it.");
+                else output.WriteLine(erased.HadBackup ? "Its backup was deleted." : "It had no backup.");
                 return 0;
             }
             case "admin":

@@ -161,7 +161,7 @@ public static class Pages
         <input id="password" name="password" type="password" autocomplete="current-password" required{(username.Length == 0 ? "" : " autofocus")}>
         <button type="submit">Sign in</button>
         </form>
-        <p class="muted"><a href="/account/password">Change your password</a></p>
+        <p class="muted"><a href="/account/password">Change your password</a> &middot; <a href="/account/delete">Delete your account</a></p>
         """);
 
     public static string ChangePassword(string username, string? problem) => Page("Change your password", $"""
@@ -178,6 +178,23 @@ public static class Pages
         <label for="again">New password again</label>
         <input id="again" name="again" type="password" autocomplete="new-password" minlength="{Passwords.MinLength}" required>
         <button type="submit">Change password</button>
+        </form>
+        """);
+
+    public const string DeleteWords = "delete my account";
+
+    public static string DeleteAccount(string username, string? problem) => Page("Delete your account", $"""
+        <h1>Delete your account</h1>
+        <p class="muted">This deletes your account on this server and everything it holds for you: your <strong>backup</strong>, the synced copy of your name, rooms and blocks, and the devices set up to be woken. Every device is signed out. <strong>It cannot be undone.</strong> Nothing on your own devices is deleted, and messages you sent stay with the people who received them.</p>
+        {(problem == null ? "" : $"<p class=\"problem\" role=\"alert\">{E(problem)}</p>")}
+        <form method="post" action="/account/delete">
+        <label for="username">Email address</label>
+        <input id="username" name="username" type="email" autocomplete="username email" autocapitalize="none" spellcheck="false" maxlength="254" required value="{E(username)}">
+        <label for="current">Password</label>
+        <input id="current" name="current" type="password" autocomplete="current-password" required>
+        <label for="confirm">Type <strong>{DeleteWords}</strong> to confirm</label>
+        <input id="confirm" name="confirm" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" required>
+        <button type="submit">Delete my account</button>
         </form>
         """);
 

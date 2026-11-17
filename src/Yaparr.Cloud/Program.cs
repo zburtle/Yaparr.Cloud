@@ -147,6 +147,36 @@ app.MapPost("/account/password", async (HttpContext http, IAccounts accounts, Lo
     return Html(http, Pages.Message("Password changed", "Every device was signed out. Open Yaparr and sign in again with the new password. Your backups are untouched."));
 }).DisableAntiforgery();
 
+// Deleting an account, by its owner: the email address, the password and the words typed. It removes the account and everything held for it (AccountErasure).
+app.MapGet("/account/delete", (HttpContext http) => Html(http, Pages.DeleteAccount("", null)));
+
+app.MapPost("/account/delete", async (HttpContext http, IAccounts accounts, LoginLimiter limiter, IBackupStore backups, IPushRegistry push, ISyncStore sync, ILoggerFactory logs) =>
+{
+    var form = await http.Request.ReadFormAsync();
+    var typed = form["username"].ToString();
+    var current = form["current"].ToString();
+    IResult Again(string problem, int status) => Html(http, Pages.DeleteAccount(typed, problem), status);
+
+    if (current.Length > 1000) return Again("That password is too long.", StatusCodes.Status400BadRequest);
+    if (AccountDirectory.Normalize(typed) is not { } name) return Again("The username or password is wrong.", StatusCodes.Status401Unauthorized);
+    if (limiter.IsBlocked(name)) return Again("Too many wrong tries. Wait a quarter of an hour and try again.", StatusCodes.Status429TooManyRequests);
+    if (!await Task.Run(() => accounts.CheckPassword(name, current)))
+    {
+        limiter.Failed(name);
+        return Again("The username or password is wrong.", StatusCodes.Status401Unauthorized);
+    }
+    limiter.Succeeded(name);
+    if (!string.Equals(form["confirm"].ToString().Trim(), Pages.DeleteWords, StringComparison.OrdinalIgnoreCase))
+        return Again($"Type \"{Pages.DeleteWords}\" in the last box to confirm. Nothing was deleted.", StatusCodes.Status400BadRequest);
+    // An admin has to be taken off the portal first, on the server, so that the last one is not deleted by mistake.
+    if (accounts.IsAdmin(name))
+        return Again("This account can sign in to the admin portal. Ask whoever runs this server to take that away first.", StatusCodes.Status409Conflict);
+    await AccountErasure.EraseAsync(name, accounts, backups, push, sync);
+    // Logged without the name: only that it happened.
+    logs.CreateLogger("Yaparr.Cloud.Accounts").LogInformation("An account was deleted by its owner");
+    return Html(http, Pages.Message("Your account is deleted", "Your backup, synced settings and wake-up registrations are gone from this server, and every device is signed out."));
+}).DisableAntiforgery();
+
 // ---- signing up, with a code from a link (the page on the website posts here) ----
 
 // The website's page collects an email address and the code from the link and posts them here, so the code goes to this server and not to the

@@ -111,7 +111,7 @@ public static class AdminPortal
                 ? Html(http, AdminPages.ConfirmRemove(session, who, accounts.IsAdmin(who)))
                 : Html(http, AdminPages.Result("There is no such account", "It may have been removed."), StatusCodes.Status404NotFound));
 
-        admin.MapPost("/accounts/remove", (HttpContext http, IAccounts accounts, AdminSessions sessions, IBackupStore store) => Post(http, accounts, sessions, async (session, form) =>
+        admin.MapPost("/accounts/remove", (HttpContext http, IAccounts accounts, AdminSessions sessions, IBackupStore store, IPushRegistry push, ISyncStore sync) => Post(http, accounts, sessions, async (session, form) =>
         {
             if (AccountDirectory.Normalize(form["name"].ToString()) is not { } name || !accounts.Exists(name))
                 return Html(http, AdminPages.Result("There is no such account", "It may have been removed."), StatusCodes.Status404NotFound);
@@ -119,8 +119,7 @@ public static class AdminPortal
                 return Html(http, AdminPages.Result("This account is an admin", "Take the portal away first, on the server: accounts admin " + name + " --remove"), StatusCodes.Status409Conflict);
             if (!string.Equals(form["confirm"].ToString().Trim(), name, StringComparison.OrdinalIgnoreCase))
                 return Html(http, AdminPages.ConfirmRemove(session, name, false, "That is not the account's address, so nothing was removed."), StatusCodes.Status400BadRequest);
-            accounts.Remove(name);
-            var hadBackup = await store.DeleteAsync(BackupStore.FolderOf(name), CancellationToken.None);
+            var (_, hadBackup) = await AccountErasure.EraseAsync(name, accounts, store, push, sync);
             log.LogInformation("Admin {Admin} removed the account {Account} ({Backup})", session.User, name, hadBackup ? "its backup was deleted" : "it had no backup");
             return Html(http, AdminPages.Result($"Removed {name}", hadBackup ? "Its backup was deleted." : "It had no backup."));
         })).DisableAntiforgery();

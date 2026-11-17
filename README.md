@@ -17,6 +17,10 @@ Two secrets, with different jobs:
 
 Accounts are made by hand. Nobody can make one by asking, and the sign-in page answers a name that does not exist exactly as it answers a wrong password. Eight wrong tries for a name lock that name for a quarter of an hour. An address is plain ASCII (up to 254 characters, the part before the @ up to 64), with nothing that could be taken for a path or markup; a password needs 10 characters or more.
 
+### Deleting an account
+
+An account's owner can delete it at **`/account/delete`** (the sign-in page links to it, and so do the apps' Yaparr Cloud settings): the email address, the password, and the words `delete my account` typed. That removes the account and everything held for it (`AccountErasure`): every signed-in device, the backup, the devices registered to be woken, and the synced records. It cannot be undone. Wrong tries are limited like sign-in (eight, then a quarter of an hour), an admin account is refused (take the portal away first with `accounts admin <email> --remove`), and the log says only that an account was deleted, not whose. `accounts remove` and the admin portal use the same code, so they no longer leave push registrations or synced records behind.
+
 ### Looking after accounts
 
 Run these where the service runs, with the same `Service__DataDirectory` (in Docker: `docker exec -it <container> dotnet Yaparr.Cloud.dll accounts ...`). The running service sees the change at once, with no restart.

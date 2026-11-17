@@ -51,6 +51,19 @@ public sealed class ServiceOptions
     public string S3DumpPrefix { get; set; } = "db-dumps/";
 
     /// <summary>
+    /// The folder in the bucket for locked pictures (<c>blobs/</c> by default), apart from the backups and the dumps and not inside either. Used when <see cref="S3Bucket"/> is
+    /// set; otherwise pictures are files in the data folder. See <see cref="S3BlobStore"/>.
+    /// </summary>
+    public string S3BlobPrefix { get; set; } = "blobs/";
+
+    /// <summary>
+    /// When true the service refuses to start unless backups and pictures are in a bucket (<see cref="S3Bucket"/> and the rest of the S3 settings) and everything else is in
+    /// a database (<see cref="Database"/>), so a missing setting can never quietly leave data as files on the machine's disk. Off by default: files are the way to run it
+    /// without either. See <see cref="Stores.CheckRemoteStorage"/>.
+    /// </summary>
+    public bool RequireRemoteStorage { get; set; }
+
+    /// <summary>
     /// Whether a save is put with <c>If-None-Match: *</c>, so that it only succeeds if nobody saved that version first (R2 and MinIO take it). Turn it off for
     /// a store that does not; the check made before the upload still stops two devices, only two copies of the service at once could then both save.
     /// </summary>

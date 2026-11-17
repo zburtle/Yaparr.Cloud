@@ -36,6 +36,11 @@ public static class Stores
 
     public static ISyncStore Sync(ServiceOptions options) => options.Database.Length > 0 ? new PostgresSyncStore(Source(options)) : new SyncStore(options);
 
+    public static IMailboxStore Mailbox(ServiceOptions options) => options.Database.Length > 0 ? new PostgresMailboxStore(Source(options)) : new MailboxStore(options);
+
+    /// <summary>Locked pictures are always files in the data folder (the database holds records, not files).</summary>
+    public static IBlobStore Blobs(ServiceOptions options) => new BlobStore(options);
+
     public static ISignupCodes Codes(ServiceOptions options) => Codes(options, () => DateTimeOffset.UtcNow);
 
     internal static ISignupCodes Codes(ServiceOptions options, Func<DateTimeOffset> now) =>

@@ -10,7 +10,7 @@ namespace Yaparr.Cloud;
 public static class PostgresDatabase
 {
     /// <summary>The version of the schema this build makes and expects. A database from a newer build is refused rather than damaged.</summary>
-    public const int SchemaVersion = 3;
+    public const int SchemaVersion = 4;
 
     private static readonly object Gate = new();
     private static readonly Dictionary<string, NpgsqlDataSource> Sources = new();
@@ -141,6 +141,31 @@ public static class PostgresDatabase
                 insert into schema_version (version) values (3);
                 """, connection, transaction);
             v3.ExecuteNonQuery();
+        }
+        if (current < 4)
+        {
+            using var v4 = new NpgsqlCommand("""
+                create table mailbox_items (
+                    mailbox text not null,
+                    cursor bigint not null,
+                    id text not null,
+                    account text not null,
+                    body text not null,
+                    at timestamptz not null,
+                    primary key (mailbox, cursor),
+                    unique (mailbox, id)
+                );
+                create index mailbox_items_at on mailbox_items (at);
+                create index mailbox_items_account on mailbox_items (account);
+
+                create table mailbox_cursors (
+                    mailbox text primary key,
+                    counter bigint not null
+                );
+
+                insert into schema_version (version) values (4);
+                """, connection, transaction);
+            v4.ExecuteNonQuery();
         }
         transaction.Commit();
     }

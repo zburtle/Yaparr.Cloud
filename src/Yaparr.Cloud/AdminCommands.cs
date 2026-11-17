@@ -239,7 +239,7 @@ public static class AdminCommands
                 var keep = rest.Contains("--keep-backup");
                 // The devices registered to be woken and the synced records go with the account.
                 var erased = name == null ? (Existed: false, HadBackup: false)
-                    : await AccountErasure.EraseAsync(name, accounts, store, Stores.Push(options), Stores.Sync(options), keep);
+                    : await AccountErasure.EraseAsync(name, accounts, store, Stores.Push(options), Stores.Sync(options), keep, mailbox: Stores.Mailbox(options), blobs: Stores.Blobs(options));
                 if (!erased.Existed) { output.WriteLine("There is no such account."); return 1; }
                 output.WriteLine($"Removed the account {name}.");
                 if (keep) output.WriteLine("Its backup was kept. Making an account with the same name again reaches it.");

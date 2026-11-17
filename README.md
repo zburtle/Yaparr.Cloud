@@ -135,9 +135,28 @@ What an account should have the same on all its devices (a room joined and its k
 - **Limits:** `SyncMaxRecords` (2000 records and markers an account; a call that would pass it stores nothing), `SyncMaxRecordBytes` (65536), `SyncWritesPerMinute` (30) and `SyncWritesPerDay` (5000) an account.
 - **Storage:** `ISyncStore`, in the database (`sync_records`, `sync_cursors`, schema version 3) or as a file for each account in `sync` in the data folder, held to the same behaviour by the same tests (`SyncStoreContractTests`).
 
+### Mailboxes (`MailboxApi`)
+
+A room's members who are offline miss what is said in it. A device that sent a message nobody confirmed leaves it, **locked**, in the room's **mailbox**, and the member's devices fetch it when they are back (design: `docs/mailbox.md` in the Yaparr repository). The service cannot read what it holds: the items are sealed on the devices with a key made from the room's secret, which the service never has, and the mailbox id is a value only the room's members can compute.
+
+- **Calls:** `POST /v1/mailbox/{id}` with `{items: [{id, body}]}` (up to 20) and `GET /v1/mailbox/{id}?since=N&limit=M` for `{cursor, more, items: [{id, body, at, cursor}]}`, with the device's bearer token. `id` in the path is 43 characters of base64url; an item's `id` is letters, digits, `-` and `_` (up to 64; the app uses the message's own key, so posting the same message again stores it once); `body` is base64.
+- **Not given to a reader:** who left an item. The account is kept beside it only to count limits and so that deleting the account (or removing it in the admin portal or with `accounts remove`) removes what it left.
+- **Limits:** `MailboxKeepDays` (30, then an item goes whether it was read or not; each post clears its own mailbox and the service clears the rest when it starts), `MailboxMaxItems` (2000 in a mailbox; a call that would pass it stores nothing, 409), `MailboxMaxItemChars` (43700 base64 characters, about 32 KB locked), `MailboxPostsPerMinute` (60) and `MailboxPostsPerDay` (5000), `MailboxReadsPerMinute` (120) and `MailboxReadsPerDay` (20000) an account.
+- **What the service sees:** that an account posted to or read a mailbox (an opaque id), when, from which address, and how big the item was; nothing of what is in it.
+- **Storage:** `IMailboxStore`, in the database (`mailbox_items`, `mailbox_cursors`, schema version 4) or as a file for each mailbox in `mailbox` in the data folder, held to the same behaviour by the same tests.
+
+### Blobs (`BlobApi`)
+
+Pictures for people who are offline: a device locks a picture with a key this service never has and uploads the locked bytes under the id `SHA-256 of those bytes`; a member fetches them by that id and opens them (design: `docs/mailbox.md` in the Yaparr repository).
+
+- **Calls:** `PUT /v1/blob/{id}` with the locked bytes as the body and the device's bearer token (the id has to be the SHA-256 of the body, 64 lower case hex digits, or it is refused); `GET /v1/blob/{id}` with no token, so a reader whose server is another one can still fetch, and the service cannot tie a read to an account (the id is the capability). The service per-address limit applies to fetching.
+- **Limits:** `BlobMaxBytes` (9437184: a picture is at most 8 MiB, plus the lock), `BlobQuotaBytes` (268435456, 256 MiB of unexpired blobs an account; a call past it stores nothing, 409), `BlobKeepDays` (30, whether fetched or not; each upload clears the expired ones and the service clears them when it starts), `BlobUploadsPerMinute` (20) and `BlobUploadsPerDay` (500) an account.
+- **Deleting:** deleting an account, in the app, the admin portal or `accounts remove`, removes the blobs it uploaded.
+- **Storage:** `IBlobStore`, as files in `blobs` in the data folder (the bytes in a file named by the id, a small file beside it with the account, size and time), also when the records are in PostgreSQL. Not in the bucket yet.
+
 ### Limits (`appsettings.json`, section `Service`, or `Service__Name` environment variables)
 
-`MaxBlobBytes` (512 MiB), `KeepVersions` (3) and `KeepDays` (7), `RequestsPerMinute` per address (120), `WritesPerHour` per account (12), `DataDirectory` (`data`), `PublicUrl` (`https://cloud.yaparr.com`), `SignupPageUrl` (`https://yaparr.com/signup`), `BehindProxy`, and for push notifications `PushWakesPerMinute`, `PushWakesPerDay`, `PushMaxPerAccount` and `PushFcmServiceAccountFile`, and for synced state `SyncMaxRecords`, `SyncMaxRecordBytes`, `SyncWritesPerMinute` and `SyncWritesPerDay`.
+`MaxBlobBytes` (512 MiB), `KeepVersions` (3) and `KeepDays` (7), `RequestsPerMinute` per address (120), `WritesPerHour` per account (12), `DataDirectory` (`data`), `PublicUrl` (`https://cloud.yaparr.com`), `SignupPageUrl` (`https://yaparr.com/signup`), `BehindProxy`, and for push notifications `PushWakesPerMinute`, `PushWakesPerDay`, `PushMaxPerAccount` and `PushFcmServiceAccountFile`, and for synced state `SyncMaxRecords`, `SyncMaxRecordBytes`, `SyncWritesPerMinute` and `SyncWritesPerDay`, and for pictures `BlobMaxBytes`, `BlobQuotaBytes`, `BlobKeepDays`, `BlobUploadsPerMinute` and `BlobUploadsPerDay`, and for mailboxes `MailboxKeepDays`, `MailboxMaxItems`, `MailboxMaxItemChars`, `MailboxPostsPerMinute`, `MailboxPostsPerDay`, `MailboxReadsPerMinute` and `MailboxReadsPerDay`.
 
 Set `BehindProxy` to `true` only when a reverse proxy is in front (it should be, for https): then the caller's address comes from `X-Forwarded-For`. Left on without a proxy, anyone can claim any address.
 

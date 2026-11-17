@@ -26,6 +26,8 @@ builder.Services.AddSingleton<IAccounts>(_ => Stores.Accounts(options));
 builder.Services.AddSingleton<ISignupCodes>(_ => Stores.Codes(options));
 builder.Services.AddSingleton<IPushRegistry>(_ => Stores.Push(options));
 builder.Services.AddSingleton<ISyncStore>(_ => Stores.Sync(options));
+builder.Services.AddSingleton<IMailboxStore>(_ => Stores.Mailbox(options));
+builder.Services.AddSingleton<IBlobStore>(_ => Stores.Blobs(options));
 builder.Services.AddSingleton<IPushSender>(_ =>
 {
     var http = PushHttp.CreateSafeClient();
@@ -62,6 +64,16 @@ builder.Services.AddRateLimiter(r =>
 });
 
 var app = builder.Build();
+
+// Items left in mailboxes go after MailboxKeepDays; each post clears its own mailbox, and this clears the ones nobody posts to any more.
+try
+{
+    var swept = app.Services.GetRequiredService<IMailboxStore>().Expire(DateTimeOffset.UtcNow, TimeSpan.FromDays(Math.Max(1, options.MailboxKeepDays)));
+    if (swept > 0) app.Logger.LogInformation("Removed {Count} expired mailbox items", swept);
+    var sweptBlobs = app.Services.GetRequiredService<IBlobStore>().Expire(DateTimeOffset.UtcNow, TimeSpan.FromDays(Math.Max(1, options.BlobKeepDays)));
+    if (sweptBlobs > 0) app.Logger.LogInformation("Removed {Count} expired pictures", sweptBlobs);
+}
+catch (Exception ex) when (ex is IOException or Npgsql.NpgsqlException) { app.Logger.LogWarning("Could not clear expired mailbox items: {Message}", ex.Message); }
 if (options.BehindProxy) app.UseForwardedHeaders();
 app.UseRateLimiter();
 
@@ -150,7 +162,7 @@ app.MapPost("/account/password", async (HttpContext http, IAccounts accounts, Lo
 // Deleting an account, by its owner: the email address, the password and the words typed. It removes the account and everything held for it (AccountErasure).
 app.MapGet("/account/delete", (HttpContext http) => Html(http, Pages.DeleteAccount("", null)));
 
-app.MapPost("/account/delete", async (HttpContext http, IAccounts accounts, LoginLimiter limiter, IBackupStore backups, IPushRegistry push, ISyncStore sync, ILoggerFactory logs) =>
+app.MapPost("/account/delete", async (HttpContext http, IAccounts accounts, LoginLimiter limiter, IBackupStore backups, IPushRegistry push, ISyncStore sync, IMailboxStore mailbox, IBlobStore blobs, ILoggerFactory logs) =>
 {
     var form = await http.Request.ReadFormAsync();
     var typed = form["username"].ToString();
@@ -171,7 +183,7 @@ app.MapPost("/account/delete", async (HttpContext http, IAccounts accounts, Logi
     // An admin has to be taken off the portal first, on the server, so that the last one is not deleted by mistake.
     if (accounts.IsAdmin(name))
         return Again("This account can sign in to the admin portal. Ask whoever runs this server to take that away first.", StatusCodes.Status409Conflict);
-    await AccountErasure.EraseAsync(name, accounts, backups, push, sync);
+    await AccountErasure.EraseAsync(name, accounts, backups, push, sync, mailbox: mailbox, blobs: blobs);
     // Logged without the name: only that it happened.
     logs.CreateLogger("Yaparr.Cloud.Accounts").LogInformation("An account was deleted by its owner");
     return Html(http, Pages.Message("Your account is deleted", "Your backup, synced settings and wake-up registrations are gone from this server, and every device is signed out."));
@@ -237,6 +249,8 @@ app.MapAdminPortal(options);
 
 app.MapPush(options);
 app.MapSync(options);
+app.MapMailbox(options);
+app.MapBlobs(options);
 
 // ---- the backup, for an app that is signed in (Authorization: Bearer <token>) ----
 

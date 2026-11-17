@@ -95,6 +95,39 @@ public sealed class ServiceOptions
     /// <summary>And in a day (5000).</summary>
     public int SyncWritesPerDay { get; set; } = 5000;
 
+    /// <summary>How many days a locked message is kept in a room's mailbox, read or not (30).</summary>
+    public int MailboxKeepDays { get; set; } = 30;
+
+    /// <summary>How many items one mailbox holds (2000).</summary>
+    public int MailboxMaxItems { get; set; } = 2000;
+
+    /// <summary>The longest body of one item, in base64 characters (43700, about 32 KB locked).</summary>
+    public int MailboxMaxItemChars { get; set; } = 43700;
+
+    /// <summary>How many times one account may leave items in a minute (60) and in a day (5000).</summary>
+    public int MailboxPostsPerMinute { get; set; } = 60;
+
+    public int MailboxPostsPerDay { get; set; } = 5000;
+
+    /// <summary>How many times one account may read mailboxes in a minute (120) and in a day (20000).</summary>
+    public int MailboxReadsPerMinute { get; set; } = 120;
+
+    public int MailboxReadsPerDay { get; set; } = 20000;
+
+    /// <summary>How many days a locked picture is kept, whether it was fetched or not (30).</summary>
+    public int BlobKeepDays { get; set; } = 30;
+
+    /// <summary>The largest locked picture, in bytes (9437184: a picture is at most 8 MiB, plus the lock).</summary>
+    public long BlobMaxBytes { get; set; } = 9_437_184;
+
+    /// <summary>How many bytes of pictures that have not expired one account may hold (268435456, 256 MiB).</summary>
+    public long BlobQuotaBytes { get; set; } = 268_435_456;
+
+    /// <summary>How many pictures one account may upload in a minute (20) and in a day (500).</summary>
+    public int BlobUploadsPerMinute { get; set; } = 20;
+
+    public int BlobUploadsPerDay { get; set; } = 500;
+
     /// <summary>True when a reverse proxy sits in front (which is how it gets https), so the caller's address is read from <c>X-Forwarded-For</c>. Leave it off when the service is reachable directly, or anyone could claim any address.</summary>
     public bool BehindProxy { get; set; }
 

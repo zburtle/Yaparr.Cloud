@@ -71,10 +71,17 @@ try
 {
     var swept = app.Services.GetRequiredService<IMailboxStore>().Expire(DateTimeOffset.UtcNow, TimeSpan.FromDays(Math.Max(1, options.MailboxKeepDays)));
     if (swept > 0) app.Logger.LogInformation("Removed {Count} expired mailbox items", swept);
+}
+catch (Exception ex) when (ex is IOException or Npgsql.NpgsqlException) { app.Logger.LogWarning("Could not clear expired mailbox items: {Message}", ex.Message); }
+
+// The same for pictures. In a bucket this is a request over the network, and a bucket that cannot be reached right now must not stop the service from starting (the
+// admin portal shows it as a problem, and the next upload clears that account's expired pictures anyway).
+try
+{
     var sweptBlobs = app.Services.GetRequiredService<IBlobStore>().Expire(DateTimeOffset.UtcNow, TimeSpan.FromDays(Math.Max(1, options.BlobKeepDays)));
     if (sweptBlobs > 0) app.Logger.LogInformation("Removed {Count} expired pictures", sweptBlobs);
 }
-catch (Exception ex) when (ex is IOException or Npgsql.NpgsqlException) { app.Logger.LogWarning("Could not clear expired mailbox items: {Message}", ex.Message); }
+catch (Exception ex) { app.Logger.LogWarning("Could not clear expired pictures: {Message}", ex.Message); }
 if (options.BehindProxy) app.UseForwardedHeaders();
 app.UseRateLimiter();
 

@@ -20,6 +20,7 @@ if (args.Length > 0 && (args[0].Equals("accounts", StringComparison.OrdinalIgnor
 
 var builder = WebApplication.CreateBuilder(args);
 var options = builder.Configuration.GetSection("Service").Get<ServiceOptions>() ?? new ServiceOptions();
+Stores.CheckRemoteStorage(options);
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton<IBackupStore>(_ => Stores.Backups(options));
 builder.Services.AddSingleton<IAccounts>(_ => Stores.Accounts(options));

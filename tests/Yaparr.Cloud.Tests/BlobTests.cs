@@ -238,3 +238,42 @@ public sealed class BlobApiTests : ServiceTest
         Assert.Equal(HttpStatusCode.OK, (await Send(client, null, HttpMethod.Get, "/v1/blob/" + b)).StatusCode);
     }
 }
+
+public sealed class RequireRemoteStorageTests
+{
+    private static ServiceOptions Complete() => new()
+    {
+        RequireRemoteStorage = true, Database = "Host=db", S3Bucket = "b", S3Endpoint = "https://x.r2.cloudflarestorage.com", S3AccessKey = "k", S3SecretKey = "s",
+    };
+
+    [Fact]
+    public void Nothing_is_checked_unless_it_is_asked_for()
+    {
+        Stores.CheckRemoteStorage(new ServiceOptions());
+        Stores.CheckRemoteStorage(new ServiceOptions { RequireRemoteStorage = false, Database = "" });
+    }
+
+    [Fact]
+    public void A_service_with_a_database_and_a_bucket_starts()
+    {
+        Stores.CheckRemoteStorage(Complete());
+    }
+
+    [Fact]
+    public void A_missing_setting_stops_the_service_and_is_named()
+    {
+        var none = Assert.Throws<InvalidOperationException>(() => Stores.CheckRemoteStorage(new ServiceOptions { RequireRemoteStorage = true }));
+        foreach (var name in new[] { "Service__Database", "Service__S3Bucket", "Service__S3Endpoint", "Service__S3AccessKey", "Service__S3SecretKey" })
+            Assert.Contains(name, none.Message);
+
+        var noDatabase = Complete();
+        noDatabase.Database = "";
+        var e = Assert.Throws<InvalidOperationException>(() => Stores.CheckRemoteStorage(noDatabase));
+        Assert.Contains("Service__Database", e.Message);
+        Assert.DoesNotContain("Service__S3Bucket", e.Message);
+
+        var noKey = Complete();
+        noKey.S3SecretKey = "";
+        Assert.Contains("Service__S3SecretKey", Assert.Throws<InvalidOperationException>(() => Stores.CheckRemoteStorage(noKey)).Message);
+    }
+}

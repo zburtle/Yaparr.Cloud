@@ -54,6 +54,24 @@ public static class Stores
     public static IBackupStore Backups(ServiceOptions options) =>
         options.S3Bucket.Length > 0 ? new S3BackupStore(S3BackupStore.CreateClient(options), options) : new BackupStore(options);
 
+    /// <summary>
+    /// With <see cref="ServiceOptions.RequireRemoteStorage"/> on, throws unless backups and pictures are set up for a bucket (every S3 setting but the optional ones) and a
+    /// database is set, naming each setting that is missing. Does nothing when it is off.
+    /// </summary>
+    public static void CheckRemoteStorage(ServiceOptions options)
+    {
+        if (!options.RequireRemoteStorage) return;
+        var missing = new List<string>();
+        if (options.Database.Length == 0) missing.Add("Service__Database");
+        if (options.S3Bucket.Length == 0) missing.Add("Service__S3Bucket");
+        if (options.S3Endpoint.Length == 0) missing.Add("Service__S3Endpoint");
+        if (options.S3AccessKey.Length == 0) missing.Add("Service__S3AccessKey");
+        if (options.S3SecretKey.Length == 0) missing.Add("Service__S3SecretKey");
+        if (missing.Count > 0)
+            throw new InvalidOperationException("Service__RequireRemoteStorage is on, so nothing may be kept as files on this machine, but these are not set: " + string.Join(", ", missing)
+                + ". Set them, or turn Service__RequireRemoteStorage off.");
+    }
+
     /// <summary>Forgets that a database was imported into and closes it (for tests).</summary>
     internal static void Forget(string connectionString)
     {

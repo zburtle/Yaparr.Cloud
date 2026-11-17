@@ -180,6 +180,8 @@ Accounts (email addresses, password hashes, token hashes, passes, the admin flag
 
 **Which versions are kept.** A backup is saved when something that cannot be lost changes (a room, a key, a linked device) and once a day for the history, so saving often must not push the older, known-good copies out: a bad save would then replace every good one. After each save the server keeps the newest `KeepVersions` (3), and the newest version of each of the last `KeepDays` (7) UTC days, counting today, and removes the rest (`Retention`). So an account holds at most ten versions: the latest few, and one from each morning of the week. The newest is never removed. (Before this, the newest five were kept whatever their age.)
 
+**Keeping everything off the machine's disk.** With `Service__RequireRemoteStorage` (`REQUIRE_REMOTE_STORAGE=true` in `.env`) the service refuses to start unless `Service__Database` and the bucket settings (`S3Bucket`, `S3Endpoint`, `S3AccessKey`, `S3SecretKey`) are all set, and says which are missing, so a forgotten setting cannot quietly leave accounts, backups or pictures as files. It is off by default, since files are how it runs without a database or a bucket. What still touches the disk is a backup's temporary staging file while it is checked and uploaded, the database itself, and the daily dump `scripts/pg-backup.sh` leaves in `~/db-backups`.
+
 ### Not done yet
 
 - Android has no backup server support, and cannot open a locked backup.

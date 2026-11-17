@@ -51,6 +51,12 @@ public sealed class ServiceOptions
     public string S3DumpPrefix { get; set; } = "db-dumps/";
 
     /// <summary>
+    /// The folder in the bucket for locked pictures (<c>blobs/</c> by default), apart from the backups and the dumps and not inside either. Used when <see cref="S3Bucket"/> is
+    /// set; otherwise pictures are files in the data folder. See <see cref="S3BlobStore"/>.
+    /// </summary>
+    public string S3BlobPrefix { get; set; } = "blobs/";
+
+    /// <summary>
     /// Whether a save is put with <c>If-None-Match: *</c>, so that it only succeeds if nobody saved that version first (R2 and MinIO take it). Turn it off for
     /// a store that does not; the check made before the upload still stops two devices, only two copies of the service at once could then both save.
     /// </summary>

@@ -38,8 +38,12 @@ public static class Stores
 
     public static IMailboxStore Mailbox(ServiceOptions options) => options.Database.Length > 0 ? new PostgresMailboxStore(Source(options)) : new MailboxStore(options);
 
-    /// <summary>Locked pictures are always files in the data folder (the database holds records, not files).</summary>
-    public static IBlobStore Blobs(ServiceOptions options) => new BlobStore(options);
+    /// <summary>
+    /// Where locked pictures are kept: in the bucket when <see cref="ServiceOptions.S3Bucket"/> is set, as files in the data folder otherwise (the database holds records,
+    /// not files).
+    /// </summary>
+    public static IBlobStore Blobs(ServiceOptions options) =>
+        options.S3Bucket.Length > 0 ? new S3BlobStore(S3BackupStore.CreateClient(options), options) : new BlobStore(options);
 
     public static ISignupCodes Codes(ServiceOptions options) => Codes(options, () => DateTimeOffset.UtcNow);
 

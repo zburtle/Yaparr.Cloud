@@ -53,7 +53,7 @@ afterwards.**
 1. R2 Object Storage: create a bucket (suggested name `yaparr-data`; the older docs say `yaparr-backups`, any name works).
 2. Make an **S3 API token** with **Object Read & Write**, limited to that one bucket. Keep the Access Key ID and Secret Access Key; they are shown once.
 3. The endpoint is `https://<account id>.r2.cloudflarestorage.com` (with `.eu.` before `r2` for the EU jurisdiction), **without** the bucket name.
-4. Optional backstop: a lifecycle rule that deletes objects under the prefix `blobs/` after 32 days (the service keeps pictures 30). **Only `blobs/`.** Do not put a
+4. Optional backstop: a lifecycle rule that deletes objects under the prefix `blobs/` after 9 days (the service keeps pictures 7). **Only `blobs/`.** Do not put a
    rule on `backups/` (the service keeps the newest versions on its own rule) or `db-dumps/`.
 
 ## 3. Postgres (skip if `SERVICE_DATABASE` is already set)
@@ -86,7 +86,7 @@ takes conditional writes). **Do not set `REQUIRE_REMOTE_STORAGE` yet.**
 ## 6. What happens to pictures
 
 Pictures already in `/data/blobs` are **not** copied. After this deploy the service reads and writes them in the bucket only, so those pictures can no longer be fetched.
-They would have expired within 30 days anyway, but anyone who was offline with a picture waiting will miss it. Tell the owner this before step 5, and leave the old
+They would have expired within 7 days anyway, but anyone who was offline with a picture waiting will miss it. Tell the owner this before step 5, and leave the old
 folder alone until step 9.
 
 ## 7. Check it works

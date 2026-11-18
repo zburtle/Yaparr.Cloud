@@ -108,8 +108,8 @@ public sealed class ServiceOptions
     /// <summary>And in a day (5000).</summary>
     public int SyncWritesPerDay { get; set; } = 5000;
 
-    /// <summary>How many days a locked message is kept in a room's mailbox, read or not (30).</summary>
-    public int MailboxKeepDays { get; set; } = 30;
+    /// <summary>How many days a locked message is kept in a room's mailbox, read or not (7: what the apps hand each other peer to peer is a week of history, and the server is only for people who are away).</summary>
+    public int MailboxKeepDays { get; set; } = 7;
 
     /// <summary>How many items one mailbox holds (2000).</summary>
     public int MailboxMaxItems { get; set; } = 2000;
@@ -127,8 +127,8 @@ public sealed class ServiceOptions
 
     public int MailboxReadsPerDay { get; set; } = 20000;
 
-    /// <summary>How many days a locked picture is kept, whether it was fetched or not (30).</summary>
-    public int BlobKeepDays { get; set; } = 30;
+    /// <summary>How many days a locked picture is kept, whether it was fetched or not (7, like the mailbox).</summary>
+    public int BlobKeepDays { get; set; } = 7;
 
     /// <summary>The largest locked picture, in bytes (9437184: a picture is at most 8 MiB, plus the lock).</summary>
     public long BlobMaxBytes { get; set; } = 9_437_184;

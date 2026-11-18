@@ -44,6 +44,38 @@ public sealed class LoginTests : ServiceTest
         await client.PostAsJsonAsync("/v1/token", new { code, verifier });
 
     [Fact]
+    public async Task A_phone_signs_in_through_the_apps_own_link_because_it_cannot_listen_while_the_browser_is_in_front()
+    {
+        var client = Start();
+        new AccountDirectory(Options).Add("sam@example.com", Password);
+        var (verifier, challenge) = Pkce();
+        const string appLink = "yaparr://signed-in";
+
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(LoginUrl(challenge, appLink))).StatusCode);
+        var done = await PostLogin(client, challenge, "sam@example.com", Password, appLink);
+        // a page that hands the browser to the app (a form's redirect to another program's link is not followed everywhere), carrying the code and the state
+        Assert.Equal(HttpStatusCode.OK, done.StatusCode);
+        var html = System.Net.WebUtility.HtmlDecode(await done.Content.ReadAsStringAsync());
+        var link = System.Text.RegularExpressions.Regex.Match(html, @"href=""(yaparr://signed-in\?[^""]+)""").Groups[1].Value;
+        var query = System.Web.HttpUtility.ParseQueryString(new Uri(link).Query);
+        Assert.Equal(State, query["state"]);
+
+        var token = await Trade(client, query["code"], verifier);
+        Assert.Equal(HttpStatusCode.OK, token.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("yaparr://signed-in/extra")]
+    [InlineData("yaparr://join")]
+    [InlineData("https://example.com/callback")]
+    public async Task Only_the_apps_exact_link_is_accepted_besides_this_computer(string redirect)
+    {
+        var client = Start();
+        var (_, challenge) = Pkce();
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync(LoginUrl(challenge, redirect))).StatusCode);
+    }
+
+    [Fact]
     public async Task Signing_in_in_the_browser_gives_the_app_a_token_that_works()
     {
         var client = Start();

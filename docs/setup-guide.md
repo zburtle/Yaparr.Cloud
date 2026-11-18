@@ -230,6 +230,8 @@ On the droplet, as `deploy`, add one line to `~/.ssh/authorized_keys`, made of t
 command="/home/deploy/Yaparr.Cloud/deploy.sh",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA... github-actions deploy (Yaparr.Cloud)
 ```
 
+`DEPLOY_HOST` has to lead to the droplet itself. **A name that goes through Cloudflare's proxy (the orange cloud) does not work**, because the proxy passes web traffic and not SSH: the deploy job then waits and fails with "Network is unreachable" or "Connection timed out". Set the DNS record to **DNS only** (grey cloud), or use the droplet's own address as `DEPLOY_HOST` (and `ssh-keyscan` that address for `DEPLOY_KNOWN_HOSTS`, checking the fingerprints against `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the droplet). The deploy step tries three times with a 20 second connect timeout, and prints what the name resolves to; an address that is not the droplet's is the sign of a proxied record.
+
 Then delete `ci_deploy_key` and `ci_deploy_key.pub` from your computer (GitHub has its own copy as a secret). To check it, run `ssh -i ci_deploy_key deploy@cloud.yaparr.com check` before you delete it: it prints the branch and commit that are running and whether the service is healthy. To turn automatic deploys off, delete that line from `authorized_keys` (and the `DEPLOY_SSH_KEY` secret).
 
 What this gives and what it costs: anyone who could run GitHub Actions in this repository (you) can deploy whatever is on `master` to the droplet, and nothing else; the key cannot open a shell. Since `deploy.sh` is part of the repository, whatever is merged into `master` runs there, so protect `master` the way you protect any branch that deploys.

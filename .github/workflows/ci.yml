@@ -160,7 +160,20 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 "deploy@$DEPLOY_HOST" deploy
+          # Where the name leads is shown (the name itself is a secret and stays hidden): if it is not the droplet's address (Cloudflare's, say, when the DNS record is
+          # proxied) SSH cannot get through, and this line says so.
+          echo "the host resolves to: $(getent ahostsv4 "$DEPLOY_HOST" | awk '{print $1}' | sort -u | tr '\n' ' ')"
+          set +e
+          for attempt in 1 2 3; do
+            ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 "deploy@$DEPLOY_HOST" deploy
+            status=$?
+            # 255 is "could not connect". Any other status means the deploy ran (and perhaps rolled itself back): that is reported, not repeated.
+            [ "$status" -ne 255 ] && exit "$status"
+            echo "attempt $attempt: could not connect over SSH"
+            [ "$attempt" -lt 3 ] && sleep 15
+          done
+          echo "::error::The runner could not reach the droplet over SSH (three tries). Check where DEPLOY_HOST leads (the line above): it must be the droplet's own address, not a proxy such as Cloudflare's, which does not pass SSH. See docs/setup-guide.md, Automatic deploys."
+          exit 255
       - name: It answers from outside
         if: steps.setup.outputs.enabled == 'true'
         run: curl -fsS --retry 6 --retry-delay 5 --retry-connrefused https://cloud.yaparr.com/healthz

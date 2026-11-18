@@ -114,7 +114,8 @@ app.MapPost("/login", async (HttpContext http, IAccounts accounts, LoginFlow flo
         return Html(http, Pages.Login(request, typed, wrong), StatusCodes.Status401Unauthorized);
     }
     limiter.Succeeded(name);
-    return Results.Redirect(flow.Complete(request, name));
+    var back = flow.Complete(request, name);
+    return LoginFlow.IsAppLink(request.RedirectUri) ? Html(http, Pages.BackToApp(back)) : Results.Redirect(back);
 }).DisableAntiforgery();
 
 // The app trades the code the browser brought back, and the verifier only it knows, for a token.

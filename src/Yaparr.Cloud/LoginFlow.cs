@@ -40,15 +40,21 @@ public sealed class LoginFlow
     public static LoginRequest? Read(string? redirectUri, string? challenge, string? state, string? device, out string problem)
     {
         problem = "This sign-in link is not complete. Start again from Yaparr.";
-        if (!Uri.TryCreate(redirectUri, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttp || uri.UserInfo.Length > 0 || uri.Fragment.Length > 0
-            || !IPAddress.TryParse(uri.Host.Trim('[', ']'), out var address) || !IPAddress.IsLoopback(address) || redirectUri!.Length > 300)
+        if (!IsAppLink(redirectUri) && (!Uri.TryCreate(redirectUri, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttp || uri.UserInfo.Length > 0 || uri.Fragment.Length > 0
+            || !IPAddress.TryParse(uri.Host.Trim('[', ']'), out var address) || !IPAddress.IsLoopback(address) || redirectUri!.Length > 300))
             return null;
         if (challenge == null || challenge.Length != 43 || !challenge.All(IsUrlSafe)) return null;
         if (state == null || state.Length is < 8 or > 128 || !state.All(IsUrlSafe)) return null;
         var name = new string((device ?? "").Where(c => !char.IsControl(c)).Take(60).ToArray()).Trim();
         problem = "";
-        return new LoginRequest(redirectUri, challenge, state, name.Length == 0 ? "A device" : name);
+        return new LoginRequest(redirectUri!, challenge, state, name.Length == 0 ? "A device" : name);
     }
+
+    /// <summary>The address of the app itself, for a phone: it cannot be listening on a port while the browser is in front (Android stops an app that is not shown), so the
+    /// browser is sent back through the app's own link, which opens it. Only this exact address, so a made-up link cannot send a code to anything else.</summary>
+    public const string AppLink = "yaparr://signed-in";
+
+    public static bool IsAppLink(string? redirectUri) => redirectUri == AppLink;
 
     private static bool IsUrlSafe(char c) => c is (>= 'a' and <= 'z') or (>= 'A' and <= 'Z') or (>= '0' and <= '9') or '-' or '_';
 
@@ -224,6 +230,15 @@ public static class Pages
         <p>{(appLink == null ? "To use it" : "Or, to do it by hand")}, open Yaparr and go to <strong>Settings &gt; Backup &gt; Backup server</strong>. Type this address, choose <strong>Sign in with your browser</strong>, and sign in with your email address and the password you just chose:</p>
         <p><strong>{E(server)}</strong></p>
         <p class="muted">You can change your password later at <a href="/account/password">{E(server)}/account/password</a>.</p>
+        """);
+
+    /// <summary>After a sign-in that is to come back through the app's link: the page that opens Yaparr (a button, and the browser is sent there as well, as
+    /// a browser does not follow a redirect from a form to another program's link everywhere).</summary>
+    public static string BackToApp(string appLink) => Page("You're signed in", $"""
+        <meta http-equiv="refresh" content="0;url={E(appLink)}">
+        <h1>Signed in</h1>
+        <p>Going back to Yaparr. If nothing happens, tap the button.</p>
+        <p><a class="button" href="{E(appLink)}">Back to Yaparr</a></p>
         """);
 
     public static string Message(string title, string text) => Page(title, $"""

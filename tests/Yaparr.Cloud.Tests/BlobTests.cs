@@ -66,6 +66,27 @@ public abstract class BlobStoreContractTests : IDisposable
     }
 
     [SkippableFact]
+    public void One_blob_is_removed_by_the_account_that_uploaded_it_and_by_nobody_else()
+    {
+        var store = NewStore();
+        var (id, data) = Blob();
+        var (other, dother) = Blob();
+        store.Put(id, "sam@example.com", data, 1000, T0, Keep);
+        store.Put(other, "sam@example.com", dother, 1000, T0, Keep);
+
+        Assert.False(store.Remove(id, "alex@example.com"));
+        Assert.NotNull(store.Get(id, T0, Keep));
+        Assert.False(store.Remove(Blob().Id, "sam@example.com"));      // there is no such blob
+        Assert.False(store.Remove("not-an-id", "sam@example.com"));
+        Assert.True(store.Remove(id, "sam@example.com"));
+        Assert.Null(store.Get(id, T0, Keep));
+        Assert.NotNull(store.Get(other, T0, Keep));                      // the account's other one is left alone
+        Assert.False(store.Remove(id, "sam@example.com"));              // already gone
+        // What was removed no longer counts against the quota.
+        Assert.Equal(BlobPutOutcome.Stored, store.Put(id, "sam@example.com", data, 2 * data.Length, T0, Keep));
+    }
+
+    [SkippableFact]
     public void Removing_an_account_removes_its_blobs_and_not_anyone_elses()
     {
         var store = NewStore();
@@ -275,5 +296,127 @@ public sealed class RequireRemoteStorageTests
         var noKey = Complete();
         noKey.S3SecretKey = "";
         Assert.Contains("Service__S3SecretKey", Assert.Throws<InvalidOperationException>(() => Stores.CheckRemoteStorage(noKey)).Message);
+    }
+}
+
+public sealed class KeepApiTests : ServiceTest
+{
+    private static async Task<HttpResponseMessage> Put(HttpClient client, string? token, string id, byte[] body) => await Send(client, token, HttpMethod.Put, "/v1/keep/" + id, body);
+
+    private static (string Id, byte[] Data) Piece(int length = 500)
+    {
+        var data = RandomNumberGenerator.GetBytes(length);
+        return (BlobRules.IdOf(data), data);
+    }
+
+    [Fact]
+    public async Task A_device_keeps_a_locked_piece_and_only_a_signed_in_device_reads_it_back()
+    {
+        var client = Start();
+        var sam = Register("sam@example.com");
+        var (id, data) = Piece();
+        Assert.Equal(HttpStatusCode.OK, (await Put(client, sam, id, data)).StatusCode);
+
+        var fetched = await Send(client, sam, HttpMethod.Get, "/v1/keep/" + id);
+        Assert.Equal(HttpStatusCode.OK, fetched.StatusCode);
+        Assert.Equal(data, await fetched.Content.ReadAsByteArrayAsync());
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Send(client, null, HttpMethod.Get, "/v1/keep/" + id)).StatusCode);   // not a capability: a sign-in is needed
+        Assert.Equal(HttpStatusCode.NotFound, (await Send(client, sam, HttpMethod.Get, "/v1/keep/" + Piece().Id)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await Send(client, null, HttpMethod.Get, "/v1/blob/" + id)).StatusCode);       // and it is not among the pictures
+    }
+
+    [Fact]
+    public async Task Only_a_signed_in_device_keeps_a_piece_and_the_id_has_to_be_the_hash_of_the_bytes()
+    {
+        var client = Start();
+        var sam = Register("sam@example.com");
+        var (id, data) = Piece();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Put(client, null, id, data)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await Put(client, sam, Piece().Id, data)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await Put(client, sam, "short", data)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await Put(client, sam, id, Array.Empty<byte>())).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await Send(client, sam, HttpMethod.Get, "/v1/keep/" + id)).StatusCode);
+    }
+
+    [Fact]
+    public async Task A_piece_over_the_limit_or_past_the_quota_is_refused_and_removing_one_makes_room()
+    {
+        var client = Start(new() { ["KeepMaxBytes"] = "1000", ["KeepQuotaBytes"] = "1200" });
+        var sam = Register("sam@example.com");
+        var (bigId, big) = Piece(1001);
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, (await Put(client, sam, bigId, big)).StatusCode);
+        var (a, da) = Piece(800);
+        var (b, db) = Piece(800);
+        Assert.Equal(HttpStatusCode.OK, (await Put(client, sam, a, da)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await Put(client, sam, b, db)).StatusCode);
+
+        Assert.Equal(HttpStatusCode.NoContent, (await Send(client, sam, HttpMethod.Delete, "/v1/keep/" + a)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await Put(client, sam, b, db)).StatusCode);
+    }
+
+    [Fact]
+    public async Task An_account_removes_its_own_pieces_and_not_anyone_elses()
+    {
+        var client = Start();
+        var sam = Register("sam@example.com");
+        var alex = Register("alex@example.com");
+        var (a, da) = Piece();
+        await Put(client, sam, a, da);
+        Assert.Equal(HttpStatusCode.NotFound, (await Send(client, alex, HttpMethod.Delete, "/v1/keep/" + a)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Send(client, null, HttpMethod.Delete, "/v1/keep/" + a)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await Send(client, sam, HttpMethod.Get, "/v1/keep/" + a)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await Send(client, sam, HttpMethod.Delete, "/v1/keep/" + a)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await Send(client, sam, HttpMethod.Get, "/v1/keep/" + a)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Deleting_an_account_removes_the_pieces_it_kept_and_leaves_anyone_elses()
+    {
+        var client = Start();
+        var sam = Register("sam@example.com");
+        var alex = Register("alex@example.com");
+        var (a, da) = Piece();
+        var (b, db) = Piece();
+        await Put(client, sam, a, da);
+        await Put(client, alex, b, db);
+        var deleted = await client.PostAsync("/account/delete", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["username"] = "sam@example.com", ["current"] = Password, ["confirm"] = "delete my account",
+        }));
+        Assert.Equal(HttpStatusCode.OK, deleted.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await Send(client, alex, HttpMethod.Get, "/v1/keep/" + b)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Send(client, sam, HttpMethod.Get, "/v1/keep/" + a)).StatusCode);   // sam's token no longer works either
+    }
+}
+
+public sealed class KeepStoreTests : IDisposable
+{
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), "yaparr-keep-" + Guid.NewGuid().ToString("N"));
+
+    public void Dispose() { try { Directory.Delete(_dir, recursive: true); } catch (IOException) { } }
+
+    [Fact]
+    public void The_sweep_of_expired_pictures_never_reaches_what_is_kept_for_good()
+    {
+        var options = new ServiceOptions { DataDirectory = _dir };
+        var keep = new KeepStore(options);
+        var blobs = new BlobStore(options);
+        var t0 = new DateTimeOffset(2026, 11, 17, 12, 0, 0, TimeSpan.Zero);
+        var forever = TimeSpan.FromDays(36500);
+        var data = RandomNumberGenerator.GetBytes(100);
+        var id = BlobRules.IdOf(data);
+        Assert.Equal(BlobPutOutcome.Stored, keep.Put(id, "sam@example.com", data, 1000, t0, forever));
+
+        Assert.Equal(0, blobs.Expire(t0.AddDays(3650), TimeSpan.FromDays(7)));
+        Assert.NotNull(keep.Get(id, t0.AddDays(3650), forever));
+        Assert.Null(blobs.Get(id, t0, TimeSpan.FromDays(7)));           // two folders: the same id is not in both
+        Assert.True(Directory.Exists(Path.Combine(_dir, "keep")));
+    }
+
+    [Fact]
+    public void The_bucket_folders_may_not_overlap_so_pruning_one_kind_never_reaches_another()
+    {
+        var options = new ServiceOptions { S3Bucket = "b", S3KeepPrefix = "blobs/keep/" };
+        Assert.Throws<InvalidOperationException>(() => new S3KeepStore(new Amazon.S3.AmazonS3Client("k", "s", new Amazon.S3.AmazonS3Config { ServiceURL = "https://x.invalid" }), options));
     }
 }

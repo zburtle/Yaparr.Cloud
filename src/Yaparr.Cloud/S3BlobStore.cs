@@ -18,7 +18,7 @@ namespace Yaparr.Cloud;
 /// The index is written before the bytes, so a blob is never held that nothing counts; an index entry left by a failed upload is removed with the expired ones.
 /// The interface is not asynchronous (the file store is not), so each call waits for the bucket.
 /// </summary>
-public sealed class S3BlobStore : IBlobStore
+public class S3BlobStore : IBlobStore
 {
     private const string AtKey = "x-amz-meta-at";
 
@@ -29,16 +29,18 @@ public sealed class S3BlobStore : IBlobStore
 
     private readonly record struct Entry(string Key, string Account, long At, long Size, string Id);
 
-    public S3BlobStore(IAmazonS3 s3, ServiceOptions options)
+    public S3BlobStore(IAmazonS3 s3, ServiceOptions options) : this(s3, options, options.S3BlobPrefix, "Service__S3BlobPrefix", "pictures") { }
+
+    protected S3BlobStore(IAmazonS3 s3, ServiceOptions options, string folder, string setting, string what)
     {
         _s3 = s3;
         _bucket = options.S3Bucket;
-        _prefix = Normalize(options.S3BlobPrefix);
-        if (_prefix.Length == 0) throw new InvalidOperationException("Service__S3BlobPrefix cannot be empty: pictures need a folder of their own in the bucket.");
-        // Pruning one kind of object must never reach another, so the folders may not contain each other.
-        foreach (var other in new[] { Normalize(options.S3Prefix), Normalize(options.S3DumpPrefix) })
-            if (other.Length > 0 && (_prefix.StartsWith(other, StringComparison.Ordinal) || other.StartsWith(_prefix, StringComparison.Ordinal)))
-                throw new InvalidOperationException($"Service__S3BlobPrefix ({_prefix}) overlaps another folder in the bucket ({other}). Use a folder of its own.");
+        _prefix = Normalize(folder);
+        if (_prefix.Length == 0) throw new InvalidOperationException($"{setting} cannot be empty: {what} need a folder of their own in the bucket.");
+        // Pruning one kind of object must never reach another, so the folders may not contain each other (the other two kinds of blobs are among them).
+        foreach (var other in new[] { Normalize(options.S3Prefix), Normalize(options.S3DumpPrefix), Normalize(options.S3BlobPrefix), Normalize(options.S3KeepPrefix) })
+            if (other.Length > 0 && other != _prefix && (_prefix.StartsWith(other, StringComparison.Ordinal) || other.StartsWith(_prefix, StringComparison.Ordinal)))
+                throw new InvalidOperationException($"{setting} ({_prefix}) overlaps another folder in the bucket ({other}). Use a folder of its own.");
     }
 
     private static string Normalize(string prefix)
@@ -168,6 +170,21 @@ public sealed class S3BlobStore : IBlobStore
         return gone.Count;
     }
 
+    public bool Remove(string id, string account)
+    {
+        if (!BlobRules.GoodId(id)) return false;
+        var owner = BackupStore.FolderOf(account);
+        var gate = _locks.GetOrAdd(owner, _ => new SemaphoreSlim(1, 1));
+        gate.Wait();
+        try
+        {
+            var mine = List(AccountPrefix(owner)).Where(e => e.Id == id).ToList();
+            foreach (var entry in mine) Remove(entry);
+            return mine.Count > 0;
+        }
+        finally { gate.Release(); }
+    }
+
     public void RemoveAccount(string account)
     {
         var owner = BackupStore.FolderOf(account);
@@ -177,3 +194,6 @@ public sealed class S3BlobStore : IBlobStore
         finally { gate.Release(); }
     }
 }
+
+/// <summary><see cref="IKeepStore"/> in the bucket, in the folder <see cref="ServiceOptions.S3KeepPrefix"/> (<c>keep/</c>), laid out like <see cref="S3BlobStore"/>.</summary>
+public sealed class S3KeepStore(IAmazonS3 s3, ServiceOptions options) : S3BlobStore(s3, options, options.S3KeepPrefix, "Service__S3KeepPrefix", "kept pieces"), IKeepStore { }

@@ -22,7 +22,20 @@ public interface IBlobStore
 
     /// <summary>Removes the blobs an account uploaded.</summary>
     void RemoveAccount(string account);
+
+    /// <summary>Removes one blob, if this account uploaded it. False when there is none, or it is another account's.</summary>
+    bool Remove(string id, string account);
 }
+
+/// <summary>
+/// The durable kind of <see cref="IBlobStore"/>: locked pieces of what an account keeps in sync (message history, the shelves of emoji, sounds and GIFs) that never expire and
+/// are counted against a quota of their own (<see cref="ServiceOptions.KeepQuotaBytes"/>). It is a store of its own (a folder, or a folder of the bucket), so the sweep of
+/// expired pictures can never reach it. Make it with <see cref="Stores.Keep"/>.
+/// </summary>
+public interface IKeepStore : IBlobStore { }
+
+/// <summary><see cref="IKeepStore"/> as files, in a folder <c>keep</c> of the data folder.</summary>
+public sealed class KeepStore(ServiceOptions options) : BlobStore(options, "keep"), IKeepStore { }
 
 internal static class BlobRules
 {
@@ -33,7 +46,7 @@ internal static class BlobRules
 }
 
 /// <summary><see cref="IBlobStore"/> as files (a folder <c>blobs</c> in the data folder: the bytes in a file named by the id, and a small file beside it that says who uploaded it and when).</summary>
-public sealed class BlobStore : IBlobStore
+public class BlobStore : IBlobStore
 {
     private sealed class Meta
     {
@@ -46,9 +59,11 @@ public sealed class BlobStore : IBlobStore
     private readonly object _gate = new();
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    public BlobStore(ServiceOptions options)
+    public BlobStore(ServiceOptions options) : this(options, "blobs") { }
+
+    protected BlobStore(ServiceOptions options, string folder)
     {
-        _root = Path.Combine(Path.GetFullPath(options.DataDirectory), "blobs");
+        _root = Path.Combine(Path.GetFullPath(options.DataDirectory), folder);
         Directory.CreateDirectory(_root);
     }
 
@@ -121,5 +136,16 @@ public sealed class BlobStore : IBlobStore
     {
         lock (_gate)
             foreach (var (id, _) in All().Where(b => b.Meta.Account == account).ToList()) Delete(id);
+    }
+
+    public bool Remove(string id, string account)
+    {
+        if (!BlobRules.GoodId(id)) return false;
+        lock (_gate)
+        {
+            if (ReadMeta(id) is not { } meta || meta.Account != account) return false;
+            Delete(id);
+            return true;
+        }
     }
 }

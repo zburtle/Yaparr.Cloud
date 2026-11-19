@@ -45,6 +45,10 @@ public static class Stores
     public static IBlobStore Blobs(ServiceOptions options) =>
         options.S3Bucket.Length > 0 ? new S3BlobStore(S3BackupStore.CreateClient(options), options) : new BlobStore(options);
 
+    /// <summary>Where the pieces an account keeps for good are held: a folder of the bucket when <see cref="ServiceOptions.S3Bucket"/> is set, a folder of the data folder otherwise.</summary>
+    public static IKeepStore Keep(ServiceOptions options) =>
+        options.S3Bucket.Length > 0 ? new S3KeepStore(S3BackupStore.CreateClient(options), options) : new KeepStore(options);
+
     public static ISignupCodes Codes(ServiceOptions options) => Codes(options, () => DateTimeOffset.UtcNow);
 
     internal static ISignupCodes Codes(ServiceOptions options, Func<DateTimeOffset> now) =>

@@ -29,6 +29,7 @@ builder.Services.AddSingleton<IPushRegistry>(_ => Stores.Push(options));
 builder.Services.AddSingleton<ISyncStore>(_ => Stores.Sync(options));
 builder.Services.AddSingleton<IMailboxStore>(_ => Stores.Mailbox(options));
 builder.Services.AddSingleton<IBlobStore>(_ => Stores.Blobs(options));
+builder.Services.AddSingleton<IKeepStore>(_ => Stores.Keep(options));
 builder.Services.AddSingleton<IPushSender>(_ =>
 {
     var http = PushHttp.CreateSafeClient();
@@ -171,7 +172,7 @@ app.MapPost("/account/password", async (HttpContext http, IAccounts accounts, Lo
 // Deleting an account, by its owner: the email address, the password and the words typed. It removes the account and everything held for it (AccountErasure).
 app.MapGet("/account/delete", (HttpContext http) => Html(http, Pages.DeleteAccount("", null)));
 
-app.MapPost("/account/delete", async (HttpContext http, IAccounts accounts, LoginLimiter limiter, IBackupStore backups, IPushRegistry push, ISyncStore sync, IMailboxStore mailbox, IBlobStore blobs, ILoggerFactory logs) =>
+app.MapPost("/account/delete", async (HttpContext http, IAccounts accounts, LoginLimiter limiter, IBackupStore backups, IPushRegistry push, ISyncStore sync, IMailboxStore mailbox, IBlobStore blobs, IKeepStore kept, ILoggerFactory logs) =>
 {
     var form = await http.Request.ReadFormAsync();
     var typed = form["username"].ToString();
@@ -192,7 +193,7 @@ app.MapPost("/account/delete", async (HttpContext http, IAccounts accounts, Logi
     // An admin has to be taken off the portal first, on the server, so that the last one is not deleted by mistake.
     if (accounts.IsAdmin(name))
         return Again("This account can sign in to the admin portal. Ask whoever runs this server to take that away first.", StatusCodes.Status409Conflict);
-    await AccountErasure.EraseAsync(name, accounts, backups, push, sync, mailbox: mailbox, blobs: blobs);
+    await AccountErasure.EraseAsync(name, accounts, backups, push, sync, mailbox: mailbox, blobs: blobs, kept: kept);
     // Logged without the name: only that it happened.
     logs.CreateLogger("Yaparr.Cloud.Accounts").LogInformation("An account was deleted by its owner");
     return Html(http, Pages.Message("Your account is deleted", "Your locked copy, synced settings and wake-up registrations are gone from this server, and every device is signed out."));
@@ -260,6 +261,7 @@ app.MapPush(options);
 app.MapSync(options);
 app.MapMailbox(options);
 app.MapBlobs(options);
+app.MapKeep(options);
 
 // ---- the backup, for an app that is signed in (Authorization: Bearer <token>) ----
 

@@ -4,14 +4,14 @@ Optional services for Yaparr, licensed under the [GNU Affero General Public Lice
 
 ## Backup storage
 
-A place to keep a **locked** profile backup, so a person can get it back from any device. The server never holds anything it can read: the app locks the backup on the device with a recovery code that never reaches the server (`ProfileCipher` in the app: Argon2id and AES-GCM), and the server refuses a file that does not start like a locked one.
+A place to keep a person's account in sync across their devices, as **locked** data (the apps call it Yaparr Cloud sync; the API below still says `backup` for the locked copy of the profile). The server never holds anything it can read: the app locks it on the device with a Sync key that never reaches the server (`ProfileCipher` in the app: Argon2id and AES-GCM), and the server refuses a file that does not start like a locked one.
 
-### Accounts: a password to sign in, a recovery code to open the backup
+### Accounts: a password to sign in, a Sync key to open what is stored
 
 Two secrets, with different jobs:
 
 - **The password signs a person in**, on a page of this service in their browser. The server keeps an Argon2id hash of it (`Passwords`). It can be changed by the person (`/account/password`) or reset by the admin, and nothing is lost when it is: it does not lock anything.
-- **The recovery code locks the backup.** The app makes it and shows it once; the server never sees it. Nobody here can open a backup, and a lost code cannot be recovered.
+- **The Sync key locks everything stored.** The app makes it and shows it once; the server never sees it. Nobody here can open a stored copy, and a lost key cannot be recovered.
 
 **An account is named by its owner's email address** (`sam@example.com`, kept trimmed and in lower case), which is what they type on the sign-in page. Nothing is ever sent to it: it only names the account, so there is no email verification and no "forgot password" email. Resetting a password is the admin's job (`accounts password`).
 

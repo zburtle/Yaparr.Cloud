@@ -138,7 +138,7 @@ GitHub Pages can host this: the page is static and the form posts straight to `c
 
 Merge the app's pull request. The app is released with `yaparr.release.json` beside it, naming `https://cloud.yaparr.com`, so Settings > Backup > Backup server and the first-start "Restore from a server" are already filled in. Until a release has that, friends can type `https://cloud.yaparr.com` themselves.
 
-**Check:** install the new version, open Settings > Backup, choose **Sign in with your browser**, sign in with the email address and password from step 8, then **Back up now**. Yaparr shows a **recovery code** once: save it. Then on a spare computer or profile, choose **Restore from a server** on the first-start screen, type the code, sign in, and the account comes back.
+**Check:** install the new version, open Settings > Backup, choose **Sign in with your browser**, sign in with the email address and password from step 8, then **Back up now**. Yaparr shows a **Sync key** once: save it. Then on a spare computer or profile, choose **Restore from Yaparr Cloud** on the first-start screen, type the key, sign in, and the account comes back.
 
 ## 10. Day to day
 
@@ -236,7 +236,7 @@ Then delete `ci_deploy_key` and `ci_deploy_key.pub` from your computer (GitHub h
 
 What this gives and what it costs: anyone who could run GitHub Actions in this repository (you) can deploy whatever is on `master` to the droplet, and nothing else; the key cannot open a shell. Since `deploy.sh` is part of the repository, whatever is merged into `master` runs there, so protect `master` the way you protect any branch that deploys.
 
-Resetting a password loses nothing: backups are locked with each person's recovery code, which the server never has, so you cannot open anyone's backup and a lost code cannot be recovered. Everything the server keeps is in the `cloud-data` volume (accounts with password hashes, signup codes as hashes, and the locked backups); the droplet backups cover it, and the `docker compose cp` line above makes a copy you can keep elsewhere.
+Resetting a password loses nothing: what is stored is locked with each person's Sync key, which the server never has, so you cannot open anyone's data and a lost key cannot be recovered. Everything the server keeps is in the `cloud-data` volume (accounts with password hashes, signup codes as hashes, and the locked backups); the droplet backups cover it, and the `docker compose cp` line above makes a copy you can keep elsewhere.
 
 ## 11. When something is wrong
 
@@ -248,7 +248,7 @@ Resetting a password loses nothing: backups are locked with each person's recove
 | An upload fails with "too big" | The backup is over 512 MiB; raise `Service__MaxBlobBytes` in `docker-compose.yml` (and `max_size` in the `Caddyfile`) and run the update command. |
 | "This sign-up link does not work" | The code was revoked, used up or has ended (`codes list` shows which), or it was cut short when pasted. |
 | A friend lost their password | `accounts password <email>`. Their backups are fine. |
-| A friend lost their recovery code | Nothing can open their old backups. They can start a new backup with a new code (Settings > Backup shows it). |
+| A friend lost their Sync key | Nothing can open what is already stored. They can start a new key (the app offers "I have lost it" when they sign in), and the old data stays unreadable. |
 
 ## 12. Costs and care
 

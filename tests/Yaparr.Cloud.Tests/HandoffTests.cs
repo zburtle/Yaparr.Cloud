@@ -101,7 +101,7 @@ public sealed class HandoffTests : ServiceTest
         var page = await (await Finish(client, token, "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Mobile Safari/537.36")).Content.ReadAsStringAsync();
         Assert.DoesNotContain("yaparr://", page);
         Assert.DoesNotContain("Open Yaparr and sign in", page);
-        Assert.Contains("Settings &gt; Backup &gt; Backup server", page);
+        Assert.Contains("Settings &gt; Yaparr Cloud", page);
         Assert.Contains("To use it", page);
     }
 

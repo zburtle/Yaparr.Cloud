@@ -197,6 +197,16 @@ Moving over:
 
 **Cost.** Storage dominates: with backups of about 50 MiB and 5 versions each, 100 accounts is about 24 GiB (R2: about $0.20 a month), 1,000 accounts about 244 GiB (about $3.50), 5,000 accounts about 1.2 TiB (about $18). Requests are small (a save is one put and one list) and R2's free tier covers a million of each class a month. Downloads are free on R2.
 
+## 10e. The UDP gateway (optional)
+
+For people on networks that block UDP (some workplaces, schools and hotels), so that messages still work. The README ("UDP gateway") says what it is and what it is limited to. It is **off** until you ask for it, because it uses this machine's bandwidth and needs a range of UDP ports open.
+
+1. In `.env`, add `COMPOSE_FILE=docker-compose.yml:docker-compose.gateway.yml` and `GATEWAY_PUBLIC_ADDRESS=` with this machine's public IP address. The ports default to 40000 to 40099 (`GATEWAY_PORT_MIN`, `GATEWAY_PORT_MAX`): one for each device using the gateway at once.
+2. Open that range for UDP to the machine, in the host firewall (`ufw allow 40000:40099/udp`) and in a cloud firewall if you use one. Docker publishes the ports around `ufw` as soon as the service starts with the file, so the range is open from then on; only the gateway's own sockets listen there.
+3. `docker compose up -d` (or `./deploy.sh deploy`). Check with `curl -i https://<your domain>/v1/gateway`: with the gateway on you get `400` (it wants a WebSocket); off, `404`.
+
+To turn it off again, take the line out of `.env` and `docker compose up -d`; the ports close with it. The limits are in the README and can be changed with `Service__Gateway…` settings. The privacy page should say that the service sees the IP addresses a device's datagrams go to and come from while it is in use.
+
 ## 10b. The published image
 
 After a merge to `master`, CI builds the image and publishes it to `ghcr.io/zburtle/yaparr-cloud`, tagged `sha-<commit>` and `latest`. `deploy.sh` pulls the one for the commit it checked out, so the droplet no longer builds anything (and needs no spare memory or disk for it). If there is no such image (a branch, or `ghcr.io` cannot be reached) it builds the image itself, as before. Anyone can run the service without cloning this repository: `docker run -p 8080:8080 -v cloud-data:/data ghcr.io/zburtle/yaparr-cloud:latest`.

@@ -1,0 +1,22 @@
+# Adds the UDP gateway to the service (README, "UDP gateway"): devices on networks that block UDP send their datagrams through a WebSocket on 443, and the service
+# sends them from a UDP port of its own. Off unless you ask for this file. To turn it on, in .env:
+#
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.gateway.yml
+#   GATEWAY_PUBLIC_ADDRESS=<this machine's public IP address>
+#
+# and then "docker compose up -d" (or ./deploy.sh deploy). A connection uses one port of the range for as long as it is open, so the range is how many
+# devices can use the gateway at once (GATEWAY_MAX_CONNECTIONS is kept to it). Docker publishes these ports around the machine's firewall (ufw does not
+# close them), and what listens on them is only the gateway's own sockets, each one for a device that is signed in and held to the limits in the README.
+# Caddy needs nothing: it passes WebSockets as they are.
+services:
+  cloud:
+    environment:
+      Service__GatewayEnabled: "true"
+      Service__GatewayPortMin: "${GATEWAY_PORT_MIN:-40000}"
+      Service__GatewayPortMax: "${GATEWAY_PORT_MAX:-40099}"
+      Service__GatewayMaxConnections: "${GATEWAY_MAX_CONNECTIONS:-100}"
+      Service__GatewayPublicAddress: "${GATEWAY_PUBLIC_ADDRESS:-}"
+      # Service__GatewayBytesPerSecond: "4096"
+      # Service__GatewayBytesPerDay: "52428800"
+    ports:
+      - "${GATEWAY_PORT_MIN:-40000}-${GATEWAY_PORT_MAX:-40099}:${GATEWAY_PORT_MIN:-40000}-${GATEWAY_PORT_MAX:-40099}/udp"

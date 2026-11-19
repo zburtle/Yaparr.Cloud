@@ -56,6 +56,9 @@ public sealed class ServiceOptions
     /// </summary>
     public string S3BlobPrefix { get; set; } = "blobs/";
 
+    /// <summary>The folder of the bucket that holds the locked pieces an account keeps for good (<c>keep/</c>). It needs a folder of its own, apart from every other.</summary>
+    public string S3KeepPrefix { get; set; } = "keep/";
+
     /// <summary>
     /// When true the service refuses to start unless backups and pictures are in a bucket (<see cref="S3Bucket"/> and the rest of the S3 settings) and everything else is in
     /// a database (<see cref="Database"/>), so a missing setting can never quietly leave data as files on the machine's disk. Off by default: files are the way to run it
@@ -140,6 +143,17 @@ public sealed class ServiceOptions
     public int BlobUploadsPerMinute { get; set; } = 20;
 
     public int BlobUploadsPerDay { get; set; } = 500;
+
+    /// <summary>The largest locked piece an account may keep, in bytes (16777216, 16 MiB).</summary>
+    public long KeepMaxBytes { get; set; } = 16_777_216;
+
+    /// <summary>How many bytes one account may keep for good (536870912, 512 MiB). Nothing here expires: a piece is held until the account removes it or the account goes.</summary>
+    public long KeepQuotaBytes { get; set; } = 536_870_912;
+
+    /// <summary>How many pieces one account may upload in a minute (60) and in a day (5000).</summary>
+    public int KeepUploadsPerMinute { get; set; } = 60;
+
+    public int KeepUploadsPerDay { get; set; } = 5000;
 
     /// <summary>True when a reverse proxy sits in front (which is how it gets https), so the caller's address is read from <c>X-Forwarded-For</c>. Leave it off when the service is reachable directly, or anyone could claim any address.</summary>
     public bool BehindProxy { get; set; }

@@ -38,9 +38,13 @@ public class S3BlobStore : IBlobStore
         _prefix = Normalize(folder);
         if (_prefix.Length == 0) throw new InvalidOperationException($"{setting} cannot be empty: {what} need a folder of their own in the bucket.");
         // Pruning one kind of object must never reach another, so the folders may not contain each other (the other two kinds of blobs are among them).
-        foreach (var other in new[] { Normalize(options.S3Prefix), Normalize(options.S3DumpPrefix), Normalize(options.S3BlobPrefix), Normalize(options.S3KeepPrefix) })
-            if (other.Length > 0 && other != _prefix && (_prefix.StartsWith(other, StringComparison.Ordinal) || other.StartsWith(_prefix, StringComparison.Ordinal)))
+        foreach (var (name, raw) in new[] { ("S3Prefix", options.S3Prefix), ("S3DumpPrefix", options.S3DumpPrefix), ("S3BlobPrefix", options.S3BlobPrefix), ("S3KeepPrefix", options.S3KeepPrefix) })
+        {
+            if (setting.EndsWith("__" + name, StringComparison.Ordinal)) continue;   // this folder's own setting; the same folder in another setting is an overlap
+            var other = Normalize(raw);
+            if (other.Length > 0 && (_prefix.StartsWith(other, StringComparison.Ordinal) || other.StartsWith(_prefix, StringComparison.Ordinal)))
                 throw new InvalidOperationException($"{setting} ({_prefix}) overlaps another folder in the bucket ({other}). Use a folder of its own.");
+        }
     }
 
     private static string Normalize(string prefix)

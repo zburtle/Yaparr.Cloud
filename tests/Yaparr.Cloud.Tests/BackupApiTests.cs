@@ -17,6 +17,9 @@ public abstract class ServiceTest : IDisposable
 
     protected ServiceOptions Options => new() { DataDirectory = Dir };
 
+    /// <summary>The service started by the last <see cref="Start"/>, for a test that needs more than an HTTP client (a WebSocket).</summary>
+    protected WebApplicationFactory<Program>? LastFactory { get; private set; }
+
     protected HttpClient Start(Dictionary<string, string>? settings = null, Action<Microsoft.Extensions.DependencyInjection.IServiceCollection>? services = null)
     {
         var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
@@ -26,6 +29,7 @@ public abstract class ServiceTest : IDisposable
             if (services != null) b.ConfigureServices(services);   // what a test puts in place of a part of the service
         });
         _factories.Add(factory);
+        LastFactory = factory;
         // A browser is sent from page to page; the tests look at each step, so they do not follow. Cookies are sent by hand, so a test says when one is.
         return factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false, HandleCookies = false });
     }

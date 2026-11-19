@@ -155,6 +155,44 @@ public sealed class ServiceOptions
 
     public int KeepUploadsPerDay { get; set; } = 5000;
 
+    // ---- the UDP gateway (see the README, "UDP gateway") ----
+
+    /// <summary>Whether the service carries UDP datagrams for devices on networks that block UDP. Off by default: it uses the service's bandwidth.</summary>
+    public bool GatewayEnabled { get; set; }
+
+    /// <summary>The speed an account's connection may send and receive at, in bytes a second (4096), and how much it may send at once (65536). Chat fits; voice and screen sharing do not.</summary>
+    public int GatewayBytesPerSecond { get; set; } = 4096;
+
+    public int GatewayBurstBytes { get; set; } = 65_536;
+
+    /// <summary>The bytes an account may send and receive in a day (52428800, 50 MiB).</summary>
+    public long GatewayBytesPerDay { get; set; } = 52_428_800;
+
+    /// <summary>The largest datagram carried, in bytes (1400).</summary>
+    public int GatewayMaxPacket { get; set; } = 1400;
+
+    /// <summary>How many different addresses one connection may send to in a minute (300): enough to look for people, not to scan.</summary>
+    public int GatewayDestinationsPerMinute { get; set; } = 300;
+
+    /// <summary>Connections for one account (2) and for the whole service (500) at once.</summary>
+    public int GatewayConnectionsPerAccount { get; set; } = 2;
+
+    public int GatewayMaxConnections { get; set; } = 500;
+
+    /// <summary>A connection that has carried nothing for this long, in seconds (300), is closed.</summary>
+    public int GatewayIdleSeconds { get; set; } = 300;
+
+    /// <summary>The UDP ports the gateway sends from, when a firewall has to be told which (0 and 0 = any port). Open this range for UDP, in and out.</summary>
+    public int GatewayPortMin { get; set; }
+
+    public int GatewayPortMax { get; set; }
+
+    /// <summary>The public address of this machine, told to the device as a hint of the address others will see (empty: the address the device connected to).</summary>
+    public string GatewayPublicAddress { get; set; } = "";
+
+    /// <summary>Allow sending to private and local addresses (false). For tests, or a service run for one network; never on a public one, where it would open the network the service is on.</summary>
+    public bool GatewayAllowPrivate { get; set; }
+
     /// <summary>True when a reverse proxy sits in front (which is how it gets https), so the caller's address is read from <c>X-Forwarded-For</c>. Leave it off when the service is reachable directly, or anyone could claim any address.</summary>
     public bool BehindProxy { get; set; }
 

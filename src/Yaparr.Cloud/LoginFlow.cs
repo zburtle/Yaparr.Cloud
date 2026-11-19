@@ -152,9 +152,9 @@ public static class Pages
         </html>
         """;
 
-    public static string Login(LoginRequest request, string username, string? problem) => Page("Sign in to the backup server", $"""
+    public static string Login(LoginRequest request, string username, string? problem) => Page("Sign in to Yaparr Cloud", $"""
         <h1>Sign in</h1>
-        <p class="muted">Yaparr on <strong>{E(request.Device)}</strong> is asking to keep your backup on this server. Your backup is locked on your own device, so the server cannot read it.</p>
+        <p class="muted">Yaparr on <strong>{E(request.Device)}</strong> is asking to keep your account in sync on this server. What it keeps is locked on your own device, so the server cannot read it.</p>
         {(problem == null ? "" : $"<p class=\"problem\" role=\"alert\">{E(problem)}</p>")}
         <form method="post" action="/login">
         <input type="hidden" name="redirect_uri" value="{E(request.RedirectUri)}">
@@ -172,7 +172,7 @@ public static class Pages
 
     public static string ChangePassword(string username, string? problem) => Page("Change your password", $"""
         <h1>Change your password</h1>
-        <p class="muted">This signs every device out, so sign in again from Yaparr afterwards. Your backups are not affected: they are locked with your recovery code, not with this password.</p>
+        <p class="muted">This signs every device out, so sign in again from Yaparr afterwards. What the server holds for you is not affected: it is locked with your Sync key, not with this password.</p>
         {(problem == null ? "" : $"<p class=\"problem\" role=\"alert\">{E(problem)}</p>")}
         <form method="post" action="/account/password">
         <label for="username">Email address</label>
@@ -191,7 +191,7 @@ public static class Pages
 
     public static string DeleteAccount(string username, string? problem) => Page("Delete your account", $"""
         <h1>Delete your account</h1>
-        <p class="muted">This deletes your account on this server and everything it holds for you: your <strong>backup</strong>, the synced copy of your name, rooms and blocks, and the devices set up to be woken. Every device is signed out. <strong>It cannot be undone.</strong> Nothing on your own devices is deleted, and messages you sent stay with the people who received them.</p>
+        <p class="muted">This deletes your account on this server and everything it holds for you: your <strong>locked copy</strong>, the synced copy of your name, rooms and blocks, and the devices set up to be woken. Every device is signed out. <strong>It cannot be undone.</strong> Nothing on your own devices is deleted, and messages you sent stay with the people who received them.</p>
         {(problem == null ? "" : $"<p class=\"problem\" role=\"alert\">{E(problem)}</p>")}
         <form method="post" action="/account/delete">
         <label for="username">Email address</label>
@@ -216,7 +216,7 @@ public static class Pages
         <input id="again" name="again" type="password" autocomplete="new-password" minlength="{Passwords.MinLength}" required>
         <button type="submit">Create my account</button>
         </form>
-        <p class="muted">Your backups are locked with a recovery code that Yaparr makes on your computer, not with this password, so the server cannot read them.</p>
+        <p class="muted">What the server holds for you is locked with a Sync key that Yaparr makes on your computer, not with this password, so the server cannot read it.</p>
         """);
 
     /// <param name="appLink">The link that opens Yaparr and signs it in (<see cref="SignInHandoff.AppLink"/>), or null where it cannot work (a phone: the Android app has no backup server yet).</param>
@@ -227,7 +227,7 @@ public static class Pages
         <p><a class="button" href="{E(appLink)}">Open Yaparr and sign in</a></p>
         <p class="muted">This opens Yaparr on this computer, which asks you to confirm before it signs in; you do not have to type your password again. It works once, for five minutes. If nothing happens, Yaparr is not installed or needs updating: <a href="https://yaparr.com">get it here</a>, and use the steps below.</p>
         """)}
-        <p>{(appLink == null ? "To use it" : "Or, to do it by hand")}, open Yaparr and go to <strong>Settings &gt; Backup &gt; Backup server</strong>. Type this address, choose <strong>Sign in with your browser</strong>, and sign in with your email address and the password you just chose:</p>
+        <p>{(appLink == null ? "To use it" : "Or, to do it by hand")}, open Yaparr and go to <strong>Settings &gt; Yaparr Cloud</strong>. Type this address, choose <strong>Sign in with your browser</strong>, and sign in with your email address and the password you just chose:</p>
         <p><strong>{E(server)}</strong></p>
         <p class="muted">You can change your password later at <a href="/account/password">{E(server)}/account/password</a>.</p>
         """);

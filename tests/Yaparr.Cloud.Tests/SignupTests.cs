@@ -136,7 +136,7 @@ public sealed class SignupTests : ServiceTest
         Assert.Equal(HttpStatusCode.OK, done.StatusCode);
         var welcome = await done.Content.ReadAsStringAsync();
         Assert.Contains("You&#39;re in", welcome);
-        Assert.Contains("Backup server", welcome);
+        Assert.Contains("Yaparr Cloud", welcome);
         Assert.True(accounts.CheckPassword("sam@example.com", "a good long password"));
         Assert.Equal("lifetime", accounts.List().Single().Pass);
 

@@ -165,7 +165,7 @@ app.MapPost("/account/password", async (HttpContext http, IAccounts accounts, Lo
     }
     limiter.Succeeded(name);
     await Task.Run(() => accounts.SetPassword(name, replacement));
-    return Html(http, Pages.Message("Password changed", "Every device was signed out. Open Yaparr and sign in again with the new password. Your backups are untouched."));
+    return Html(http, Pages.Message("Password changed", "Every device was signed out. Open Yaparr and sign in again with the new password. What the server holds for you is untouched."));
 }).DisableAntiforgery();
 
 // Deleting an account, by its owner: the email address, the password and the words typed. It removes the account and everything held for it (AccountErasure).
@@ -195,7 +195,7 @@ app.MapPost("/account/delete", async (HttpContext http, IAccounts accounts, Logi
     await AccountErasure.EraseAsync(name, accounts, backups, push, sync, mailbox: mailbox, blobs: blobs);
     // Logged without the name: only that it happened.
     logs.CreateLogger("Yaparr.Cloud.Accounts").LogInformation("An account was deleted by its owner");
-    return Html(http, Pages.Message("Your account is deleted", "Your backup, synced settings and wake-up registrations are gone from this server, and every device is signed out."));
+    return Html(http, Pages.Message("Your account is deleted", "Your locked copy, synced settings and wake-up registrations are gone from this server, and every device is signed out."));
 }).DisableAntiforgery();
 
 // ---- signing up, with a code from a link (the page on the website posts here) ----
@@ -218,7 +218,7 @@ app.MapPost("/signup", async (HttpContext http, IAccounts accounts, ISignupCodes
         return Html(http, Pages.Message("This link does not work", badCode), StatusCodes.Status403Forbidden);
     }
     if (accounts.HasPassword(email))
-        return Html(http, Pages.Message("You already have an account", "That email address already has an account here. Open Yaparr and sign in to the backup server with it."), StatusCodes.Status409Conflict);
+        return Html(http, Pages.Message("You already have an account", "That email address already has an account here. Open Yaparr and sign in to Yaparr Cloud with it."), StatusCodes.Status409Conflict);
 
     // Counted against the code once for a person, even if they come back to finish.
     if (codes.Use(form["code"].ToString(), email) is not { } codeId || accounts.StartSignup(email, codeId) is not { } token)

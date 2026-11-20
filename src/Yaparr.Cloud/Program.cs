@@ -126,7 +126,7 @@ app.MapPost("/v1/token", async (HttpContext http, IAccounts accounts, LoginFlow 
     TokenRequest? body;
     try { body = await http.Request.ReadFromJsonAsync<TokenRequest>(); }
     catch (Exception ex) when (ex is JsonException or InvalidOperationException) { body = null; }
-    if (flow.Redeem(body?.Code, body?.Verifier) is not { } signedIn || accounts.IssueToken(signedIn.User, signedIn.Device) is not { } token)
+    if (flow.Redeem(body?.Code, body?.Verifier) is not { } signedIn || accounts.IssueToken(signedIn.User, signedIn.Device, body?.DeviceKey) is not { } token)
         return Problem(StatusCodes.Status400BadRequest, "That sign-in has expired or was already used. Sign in again.");
     return Results.Json(new { token, username = signedIn.User });
 });
@@ -328,7 +328,7 @@ static string? BearerOf(HttpContext http)
 // A page for a browser: never kept, never framed by another site, and with nothing it could load from anywhere.
 static IResult Html(HttpContext http, string page, int status = StatusCodes.Status200OK) => Responses.Html(http, page, status);
 
-internal sealed record TokenRequest(string? Code, string? Verifier);
+internal sealed record TokenRequest(string? Code, string? Verifier, string? DeviceKey = null);
 
 internal sealed record HandoffRequest(string? Code);
 

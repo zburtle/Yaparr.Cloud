@@ -155,13 +155,23 @@ public sealed class PostgresAccounts : IAccounts
 
     public bool Remove(string name) => Run("delete from accounts where name = @n", ("n", name)) == 1;
 
-    public string? IssueToken(string name, string deviceName)
+    public string? IssueToken(string name, string deviceName, string? deviceKey = null)
     {
+        var key = AccountDirectory.KeyHashOf(deviceKey);
         var token = AccountDirectory.TokenPrefix + Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));
         using var c = _db.OpenConnection();
         using var transaction = c.BeginTransaction();
-        using (var insert = new NpgsqlCommand("insert into devices (token_hash, account, name, created) select @h, name, @d, @c from accounts where name = @n", c, transaction))
+        if (key.Length > 0)
         {
+            // The same device signing in again takes the place of its earlier sign-in.
+            using var replace = new NpgsqlCommand("delete from devices where account = @n and device_key = @k", c, transaction);
+            replace.Parameters.AddWithValue("n", name);
+            replace.Parameters.AddWithValue("k", key);
+            replace.ExecuteNonQuery();
+        }
+        using (var insert = new NpgsqlCommand("insert into devices (token_hash, account, name, created, device_key) select @h, name, @d, @c, @k from accounts where name = @n", c, transaction))
+        {
+            insert.Parameters.AddWithValue("k", key.Length > 0 ? key : DBNull.Value);
             insert.Parameters.AddWithValue("h", AccountDirectory.HashOf(token));
             insert.Parameters.AddWithValue("d", deviceName.Length > 60 ? deviceName[..60] : deviceName);
             insert.Parameters.AddWithValue("c", DateTimeOffset.UtcNow);

@@ -92,7 +92,7 @@ The pages are plain HTML with no scripts, are never cached or framed, and everyt
 | `POST /signup` | form: `email`, `code` | the page to choose a password (an account without one is made), or why the code does not work |
 | `POST /account/setup` | form: `token`, `password`, `again` | the welcome page; the token works once, for 30 minutes |
 | `GET /login`, `POST /login` | the sign-in page (see above) | `302` back to the app with `code` and `state` |
-| `POST /v1/token` | `{"code","verifier"}` | `{token, username}`; `400` if the code is spent, late or the verifier is wrong |
+| `POST /v1/token` | `{"code","verifier","deviceKey"?}` | `{token, username}`; `400` if the code is spent, late or the verifier is wrong. `deviceKey` is a random id (16 to 64 letters, digits, `-` and `_`) the app makes once for the device and keeps: the same device signing in again (a reinstall that kept it, a sign-in after being signed out) takes the place of its earlier sign-in instead of adding a duplicate to the list of devices. Only a hash of it is kept; without one (older apps) each sign-in is a device of its own. |
 | `POST /v1/token/handoff` | `{"code"}` from the button on the "You're in" page | `{token, username}`; `400` if the code is spent, late or never made |
 | `DELETE /v1/token` | `Authorization: Bearer <token>` | `204`; signs that device out |
 | `GET /account/password`, `POST` | the change-password page | signs every device out |

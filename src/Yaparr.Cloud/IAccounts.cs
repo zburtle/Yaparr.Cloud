@@ -42,8 +42,12 @@ public interface IAccounts
     /// <summary>Removes an account and signs its devices out. False if there was none.</summary>
     bool Remove(string name);
 
-    /// <summary>Signs a device in: makes its token (shown once, kept only as a hash); the oldest device is signed out when there are a great many. Null if there is no such account.</summary>
-    string? IssueToken(string name, string deviceName);
+    /// <summary>
+    /// Signs a device in: makes its token (shown once, kept only as a hash); the oldest device is signed out when there are a great many. Null if there is no such account.
+    /// <paramref name="deviceKey"/> is a random id the app made once for the device and keeps (a good one is 16 to 64 letters, digits, - and _; anything else is ignored): the same
+    /// device signing in again, which is a new token, replaces its own earlier sign-in instead of adding to the list. Only a hash of it is kept.
+    /// </summary>
+    string? IssueToken(string name, string deviceName, string? deviceKey = null);
 
     /// <summary>The account a token signs in as, or null if it is not (or no longer) a token of anyone.</summary>
     string? UserOfToken(string? token);

@@ -56,9 +56,9 @@ public sealed class GatewayRegistry
 
 /// <summary>
 /// The UDP gateway (see the README, "UDP gateway"): for a device on a network that blocks UDP. It opens one WebSocket on port 443, and the service sends the datagrams it is given from a
-/// UDP socket of its own (the address the world then sees for the device) and hands back what arrives there. Only for messages at first, so it is <b>capped</b>: a rate and a burst
+/// UDP socket of its own (the address the world then sees for the device) and hands back what arrives there. For messages and voice, not screens, so it is <b>capped</b>: a rate and a burst
 /// for each direction, a size for a datagram, a day's bytes for the account, a number of different places a minute, public addresses only, and a few connections for each account.
-/// Voice and screen sharing do not fit in those limits; the chat protocol does. Everything the devices send through it is already locked between them; the service sees where it goes
+/// The chat protocol and voice fit in those limits; screen sharing, which needs several times the speed, does not (the apps also turn the share and watch buttons off while the gateway is in use). Everything the devices send through it is already locked between them; the service sees where it goes
 /// and how much, and never what it says. Off unless <see cref="ServiceOptions.GatewayEnabled"/>.
 /// </summary>
 internal static class GatewayApi

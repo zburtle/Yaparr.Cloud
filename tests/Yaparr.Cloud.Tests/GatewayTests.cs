@@ -210,3 +210,18 @@ public sealed class GatewayApiTests : ServiceTest
         first.Abort();
     }
 }
+
+public sealed class GatewayLimitsTests
+{
+    [Fact]
+    public void The_default_speed_fits_voice_with_a_couple_of_people_and_is_far_below_a_screen_share()
+    {
+        var options = new ServiceOptions();
+        const double voiceToOnePersonBytesPerSecond = 90_000 / 8.0;      // about 90 kbit/s on the wire for each person a voice goes to
+        const double smallestScreenShareBytesPerSecond = 1_000_000 / 8.0; // a screen share of 1 Mbit/s, below the lowest steps the apps use
+        Assert.True(options.GatewayBytesPerSecond >= 2 * voiceToOnePersonBytesPerSecond);
+        Assert.True(options.GatewayBytesPerSecond * 4 < smallestScreenShareBytesPerSecond);
+        // A day's bytes allow about 8 hours of one-to-one voice in both directions.
+        Assert.True(options.GatewayBytesPerDay >= 2 * voiceToOnePersonBytesPerSecond * 8 * 3600);
+    }
+}

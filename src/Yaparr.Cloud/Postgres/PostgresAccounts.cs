@@ -155,25 +155,30 @@ public sealed class PostgresAccounts : IAccounts
 
     public bool Remove(string name) => Run("delete from accounts where name = @n", ("n", name)) == 1;
 
-    public string? IssueToken(string name, string deviceName, string? deviceKey = null)
+    public string? IssueToken(string name, string deviceName, string? deviceKey = null, string? machineKey = null)
     {
         var key = AccountDirectory.KeyHashOf(deviceKey);
+        var machine = AccountDirectory.KeyHashOf(machineKey, "machine-key:");
+        var shown = deviceName.Length > 60 ? deviceName[..60] : deviceName;
         var token = AccountDirectory.TokenPrefix + Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));
         using var c = _db.OpenConnection();
         using var transaction = c.BeginTransaction();
-        if (key.Length > 0)
+        if (key.Length > 0 || machine.Length > 0)
         {
-            // The same device signing in again takes the place of its earlier sign-in.
-            using var replace = new NpgsqlCommand("delete from devices where account = @n and device_key = @k", c, transaction);
+            // The same device signing in again takes the place of its earlier sign-in: by its own id, or by the machine it is (with the same name).
+            using var replace = new NpgsqlCommand("delete from devices where account = @n and ((@k <> '' and device_key = @k) or (@m <> '' and machine_key = @m and name = @d))", c, transaction);
             replace.Parameters.AddWithValue("n", name);
             replace.Parameters.AddWithValue("k", key);
+            replace.Parameters.AddWithValue("m", machine);
+            replace.Parameters.AddWithValue("d", shown);
             replace.ExecuteNonQuery();
         }
-        using (var insert = new NpgsqlCommand("insert into devices (token_hash, account, name, created, device_key) select @h, name, @d, @c, @k from accounts where name = @n", c, transaction))
+        using (var insert = new NpgsqlCommand("insert into devices (token_hash, account, name, created, device_key, machine_key) select @h, name, @d, @c, @k, @m from accounts where name = @n", c, transaction))
         {
             insert.Parameters.AddWithValue("k", key.Length > 0 ? key : DBNull.Value);
+            insert.Parameters.AddWithValue("m", machine.Length > 0 ? machine : DBNull.Value);
             insert.Parameters.AddWithValue("h", AccountDirectory.HashOf(token));
-            insert.Parameters.AddWithValue("d", deviceName.Length > 60 ? deviceName[..60] : deviceName);
+            insert.Parameters.AddWithValue("d", shown);
             insert.Parameters.AddWithValue("c", DateTimeOffset.UtcNow);
             insert.Parameters.AddWithValue("n", name);
             if (insert.ExecuteNonQuery() != 1) return null;

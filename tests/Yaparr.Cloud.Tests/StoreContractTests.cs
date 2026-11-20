@@ -178,6 +178,32 @@ public abstract class StoreContractTests : IDisposable
     }
 
     [SkippableFact]
+    public void The_same_machine_signing_in_again_without_its_own_id_replaces_its_entry_only_with_the_same_name()
+    {
+        var accounts = NewAccounts();
+        accounts.Add("sam@example.com", Password);
+        accounts.Add("kim@example.com", Password);
+        const string machine = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90";
+        var first = accounts.IssueToken("sam@example.com", "ZACHDESKTOP", deviceKey: null, machineKey: machine)!;
+        var clone = accounts.IssueToken("sam@example.com", "A CLONE", deviceKey: null, machineKey: machine)!;      // the same machine id, another name: a cloned image, another device
+        var kim = accounts.IssueToken("kim@example.com", "ZACHDESKTOP", deviceKey: null, machineKey: machine)!;     // another account
+
+        var again = accounts.IssueToken("sam@example.com", "ZACHDESKTOP", deviceKey: "0123456789abcdef0123456789abcdef", machineKey: machine)!;
+        Assert.Null(accounts.UserOfToken(first));                                       // the machine signing in again replaced its earlier entry ...
+        Assert.Equal("sam@example.com", accounts.UserOfToken(clone));                   // ... but not the clone
+        Assert.Equal("kim@example.com", accounts.UserOfToken(kim));
+        Assert.Equal("sam@example.com", accounts.UserOfToken(again));
+        Assert.Equal(new[] { "A CLONE", "ZACHDESKTOP" }, accounts.DevicesOf("sam@example.com").Select(d => d.Name).Order());
+
+        // No machine id (or a bad one) never matches anything.
+        accounts.IssueToken("sam@example.com", "ZACHDESKTOP");
+        accounts.IssueToken("sam@example.com", "ZACHDESKTOP", machineKey: "short");
+        accounts.IssueToken("sam@example.com", "ZACHDESKTOP", machineKey: "short");
+        Assert.Equal(5, accounts.DevicesOf("sam@example.com").Count);
+        Assert.NotEqual(AccountDirectory.KeyHashOf(machine), AccountDirectory.KeyHashOf(machine, "machine-key:"));   // the two kinds of id are kept apart
+    }
+
+    [SkippableFact]
     public void No_token_is_made_for_an_account_that_is_not_there_and_only_a_hash_of_one_is_kept()
     {
         var accounts = NewAccounts();

@@ -169,10 +169,12 @@ public static class PostgresDatabase
         }
         if (current < 5)
         {
-            // A device's own id (a hash), so the same device signing in again takes the place of its earlier sign-in. Additive: older rows have none.
+            // A device's own id and an id derived from the machine (both hashes), so the same device signing in again takes the place of its earlier sign-in. Additive: older rows have none.
             using var v5 = new NpgsqlCommand("""
                 alter table devices add column device_key text;
+                alter table devices add column machine_key text;
                 create index devices_account_key on devices (account, device_key) where device_key is not null;
+                create index devices_account_machine on devices (account, machine_key) where machine_key is not null;
 
                 insert into schema_version (version) values (5);
                 """, connection, transaction);

@@ -46,8 +46,10 @@ public interface IAccounts
     /// Signs a device in: makes its token (shown once, kept only as a hash); the oldest device is signed out when there are a great many. Null if there is no such account.
     /// <paramref name="deviceKey"/> is a random id the app made once for the device and keeps (a good one is 16 to 64 letters, digits, - and _; anything else is ignored): the same
     /// device signing in again, which is a new token, replaces its own earlier sign-in instead of adding to the list. Only a hash of it is kept.
+    /// <paramref name="machineKey"/> is a second id, derived from the machine itself (its install of the system, never sent as it is): it catches the same machine signing in again after
+    /// the app lost its own id (a profile wiped, the app reinstalled), but only together with the same device name, because machines cloned from one image share it.
     /// </summary>
-    string? IssueToken(string name, string deviceName, string? deviceKey = null);
+    string? IssueToken(string name, string deviceName, string? deviceKey = null, string? machineKey = null);
 
     /// <summary>The account a token signs in as, or null if it is not (or no longer) a token of anyone.</summary>
     string? UserOfToken(string? token);

@@ -259,6 +259,21 @@ public sealed class AdminPortalTests : ServiceTest
     }
 
     [Fact]
+    public async Task The_overview_shows_what_each_account_holds_against_its_limits()
+    {
+        var admin = NewAdmin();
+        new AccountDirectory(Options).Add("friend@example.com", Password);
+        var (_, _, html) = await Open(admin);
+
+        Assert.Contains("<th>Kept in sync</th>", html);
+        Assert.Contains("<th>Pictures left</th>", html);
+        Assert.Contains("<th>Gateway today</th>", html);
+        Assert.Contains($"of {Options.KeepQuotaBytes / 1048576.0:0.0} MiB", html);
+        Assert.Contains($"of {Options.BlobQuotaBytes / 1048576.0:0.0} MiB", html);
+        Assert.Contains($"of {Options.GatewayBytesPerDay / 1048576.0:0.0} MiB", html);
+    }
+
+    [Fact]
     public async Task A_form_without_the_session_token_is_refused_and_one_without_a_session_goes_to_the_sign_in()
     {
         var admin = NewAdmin();

@@ -147,8 +147,8 @@ public sealed class ServiceOptions
     /// <summary>The largest locked piece an account may keep, in bytes (16777216, 16 MiB).</summary>
     public long KeepMaxBytes { get; set; } = 16_777_216;
 
-    /// <summary>How many bytes one account may keep for good (536870912, 512 MiB). Nothing here expires: a piece is held until the account removes it or the account goes.</summary>
-    public long KeepQuotaBytes { get; set; } = 536_870_912;
+    /// <summary>How many bytes one account may keep for good (1073741824, 1 GiB). Nothing here expires: a piece is held until the account removes it or the account goes.</summary>
+    public long KeepQuotaBytes { get; set; } = 1_073_741_824;
 
     /// <summary>How many pieces one account may upload in a minute (60) and in a day (5000).</summary>
     public int KeepUploadsPerMinute { get; set; } = 60;

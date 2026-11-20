@@ -64,6 +64,47 @@ public sealed class LoginTests : ServiceTest
         Assert.Equal(HttpStatusCode.OK, token.StatusCode);
     }
 
+    [Fact]
+    public async Task The_same_device_signing_in_again_is_one_device_in_the_list_when_it_gives_its_own_id()
+    {
+        var client = Start();
+        new AccountDirectory(Options).Add("sam@example.com", Password);
+        const string key = "0123456789abcdef0123456789abcdef";
+        var tokens = new List<string>();
+        for (int i = 0; i < 3; i++)
+        {
+            var (verifier, challenge) = Pkce();
+            var code = CodeIn(await PostLogin(client, challenge, "sam@example.com", Password));
+            var response = await client.PostAsJsonAsync("/v1/token", new { code, verifier, deviceKey = key });
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            tokens.Add((await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>()).GetProperty("token").GetString()!);
+        }
+        var accounts = new AccountDirectory(Options);
+        Assert.Single(accounts.DevicesOf("sam@example.com"));
+        Assert.Null(accounts.UserOfToken(tokens[0]));
+        Assert.Equal("sam@example.com", accounts.UserOfToken(tokens[2]));
+
+        // The machine's own id replaces the entry too, when the device has lost the id it keeps for itself (same name: the browser sign-in names it "Sam's laptop").
+        const string machine = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90";
+        for (int i = 0; i < 2; i++)
+        {
+            var (verifier, challenge) = Pkce();
+            var code = CodeIn(await PostLogin(client, challenge, "sam@example.com", Password));
+            var response = await client.PostAsJsonAsync("/v1/token", new { code, verifier, machineKey = machine });
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+        Assert.Equal(2, new AccountDirectory(Options).DevicesOf("sam@example.com").Count);      // the one with the id, and the one that has only the machine's
+
+        // Without an id (an older app) each sign-in is a device of its own, as before.
+        for (int i = 0; i < 2; i++)
+        {
+            var (verifier, challenge) = Pkce();
+            var code = CodeIn(await PostLogin(client, challenge, "sam@example.com", Password));
+            Assert.Equal(HttpStatusCode.OK, (await Trade(client, code, verifier)).StatusCode);
+        }
+        Assert.Equal(4, new AccountDirectory(Options).DevicesOf("sam@example.com").Count);
+    }
+
     [Theory]
     [InlineData("yaparr://signed-in/extra")]
     [InlineData("yaparr://join")]

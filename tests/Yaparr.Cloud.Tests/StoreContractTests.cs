@@ -146,6 +146,64 @@ public abstract class StoreContractTests : IDisposable
     }
 
     [SkippableFact]
+    public void The_same_device_signing_in_again_takes_the_place_of_its_earlier_sign_in_and_other_devices_stay()
+    {
+        var accounts = NewAccounts();
+        accounts.Add("sam@example.com", Password);
+        accounts.Add("kim@example.com", Password);
+        const string laptop = "0123456789abcdef0123456789abcdef", phone = "fedcba9876543210fedcba9876543210";
+        var first = accounts.IssueToken("sam@example.com", "laptop", laptop)!;
+        var phoneToken = accounts.IssueToken("sam@example.com", "phone", phone)!;
+        var other = accounts.IssueToken("sam@example.com", "no id")!;
+        var kim = accounts.IssueToken("kim@example.com", "laptop", laptop)!;           // the same id on another account is another device
+
+        var again = accounts.IssueToken("sam@example.com", "laptop (renamed)", laptop)!;
+        Assert.Null(accounts.UserOfToken(first));                                       // the earlier sign-in of that device is gone
+        Assert.Equal("sam@example.com", accounts.UserOfToken(again));
+        Assert.Equal("sam@example.com", accounts.UserOfToken(phoneToken));
+        Assert.Equal("sam@example.com", accounts.UserOfToken(other));
+        Assert.Equal("kim@example.com", accounts.UserOfToken(kim));
+        Assert.Equal(3, accounts.DevicesOf("sam@example.com").Count);
+        Assert.Contains(accounts.DevicesOf("sam@example.com"), d => d.Name == "laptop (renamed)");
+
+        // Devices that give no id (or a bad one) are never taken for each other: each sign-in is its own.
+        accounts.IssueToken("sam@example.com", "no id");
+        accounts.IssueToken("sam@example.com", "bad", "short");
+        accounts.IssueToken("sam@example.com", "bad", "short");
+        Assert.Equal(6, accounts.DevicesOf("sam@example.com").Count);
+        Assert.Equal("", AccountDirectory.KeyHashOf("short"));
+        Assert.Equal("", AccountDirectory.KeyHashOf("has spaces in it which is not allowed"));
+        Assert.NotEqual("", AccountDirectory.KeyHashOf(laptop));
+        Assert.DoesNotContain(laptop, AccountDirectory.KeyHashOf(laptop));
+    }
+
+    [SkippableFact]
+    public void The_same_machine_signing_in_again_without_its_own_id_replaces_its_entry_only_with_the_same_name()
+    {
+        var accounts = NewAccounts();
+        accounts.Add("sam@example.com", Password);
+        accounts.Add("kim@example.com", Password);
+        const string machine = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90";
+        var first = accounts.IssueToken("sam@example.com", "ZACHDESKTOP", deviceKey: null, machineKey: machine)!;
+        var clone = accounts.IssueToken("sam@example.com", "A CLONE", deviceKey: null, machineKey: machine)!;      // the same machine id, another name: a cloned image, another device
+        var kim = accounts.IssueToken("kim@example.com", "ZACHDESKTOP", deviceKey: null, machineKey: machine)!;     // another account
+
+        var again = accounts.IssueToken("sam@example.com", "ZACHDESKTOP", deviceKey: "0123456789abcdef0123456789abcdef", machineKey: machine)!;
+        Assert.Null(accounts.UserOfToken(first));                                       // the machine signing in again replaced its earlier entry ...
+        Assert.Equal("sam@example.com", accounts.UserOfToken(clone));                   // ... but not the clone
+        Assert.Equal("kim@example.com", accounts.UserOfToken(kim));
+        Assert.Equal("sam@example.com", accounts.UserOfToken(again));
+        Assert.Equal(new[] { "A CLONE", "ZACHDESKTOP" }, accounts.DevicesOf("sam@example.com").Select(d => d.Name).Order());
+
+        // No machine id (or a bad one) never matches anything.
+        accounts.IssueToken("sam@example.com", "ZACHDESKTOP");
+        accounts.IssueToken("sam@example.com", "ZACHDESKTOP", machineKey: "short");
+        accounts.IssueToken("sam@example.com", "ZACHDESKTOP", machineKey: "short");
+        Assert.Equal(5, accounts.DevicesOf("sam@example.com").Count);
+        Assert.NotEqual(AccountDirectory.KeyHashOf(machine), AccountDirectory.KeyHashOf(machine, "machine-key:"));   // the two kinds of id are kept apart
+    }
+
+    [SkippableFact]
     public void No_token_is_made_for_an_account_that_is_not_there_and_only_a_hash_of_one_is_kept()
     {
         var accounts = NewAccounts();

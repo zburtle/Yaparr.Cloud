@@ -10,7 +10,7 @@ namespace Yaparr.Cloud;
 public static class PostgresDatabase
 {
     /// <summary>The version of the schema this build makes and expects. A database from a newer build is refused rather than damaged.</summary>
-    public const int SchemaVersion = 4;
+    public const int SchemaVersion = 5;
 
     private static readonly object Gate = new();
     private static readonly Dictionary<string, NpgsqlDataSource> Sources = new();
@@ -166,6 +166,19 @@ public static class PostgresDatabase
                 insert into schema_version (version) values (4);
                 """, connection, transaction);
             v4.ExecuteNonQuery();
+        }
+        if (current < 5)
+        {
+            // A device's own id and an id derived from the machine (both hashes), so the same device signing in again takes the place of its earlier sign-in. Additive: older rows have none.
+            using var v5 = new NpgsqlCommand("""
+                alter table devices add column device_key text;
+                alter table devices add column machine_key text;
+                create index devices_account_key on devices (account, device_key) where device_key is not null;
+                create index devices_account_machine on devices (account, machine_key) where machine_key is not null;
+
+                insert into schema_version (version) values (5);
+                """, connection, transaction);
+            v5.ExecuteNonQuery();
         }
         transaction.Commit();
     }

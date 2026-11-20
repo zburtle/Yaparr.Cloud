@@ -22,6 +22,10 @@ public sealed partial class AccountDirectory : IAccounts
         public string Hash { get; set; } = "";
         public string Name { get; set; } = "";
         public DateTimeOffset Created { get; set; }
+        /// <summary>The hash of the id the app gave for itself (see <see cref="IAccounts.IssueToken"/>), or empty for a device that did not.</summary>
+        public string Key { get; set; } = "";
+        /// <summary>The hash of the id derived from the machine (see <see cref="IAccounts.IssueToken"/>), or empty.</summary>
+        public string Machine { get; set; } = "";
     }
 
     /// <summary>The pass every account has: it does not run out. (Nothing here ends an account on a date; the field says what the person was promised.)</summary>
@@ -318,6 +322,10 @@ public sealed partial class AccountDirectory : IAccounts
         }
     }
 
+    /// <summary>The hash kept for a device's own id, or empty when there is none or it is not a good one (16 to 64 letters, digits, - and _).</summary>
+    internal static string KeyHashOf(string? deviceKey, string purpose = "device-key:") =>
+        deviceKey is { Length: >= 16 and <= 64 } && deviceKey.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_') ? HashOf(purpose + deviceKey) : "";
+
     /// <summary>The public name of a device: the start of its token's hash.</summary>
     internal static string DeviceIdOf(string hash) => hash[..16];
 
@@ -327,14 +335,20 @@ public sealed partial class AccountDirectory : IAccounts
     /// Signs a device in: makes its token, which is shown to that device once and kept here only as a hash. The oldest device is signed out when
     /// an account has a great many. Null if there is no such account.
     /// </summary>
-    public string? IssueToken(string name, string deviceName)
+    public string? IssueToken(string name, string deviceName, string? deviceKey = null, string? machineKey = null)
     {
+        var key = KeyHashOf(deviceKey);
+        var machine = KeyHashOf(machineKey, "machine-key:");
+        var shown = deviceName.Length > 60 ? deviceName[..60] : deviceName;
         var token = TokenPrefix + Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));
         lock (_gate)
         {
             Refresh();
             if (!_users.TryGetValue(name, out var entry)) return null;
-            entry.Devices.Add(new Device { Hash = HashOf(token), Name = deviceName.Length > 60 ? deviceName[..60] : deviceName, Created = DateTimeOffset.UtcNow });
+            // The same device signing in again takes the place of its earlier sign-in: by the id it keeps for itself, or (it lost that) by the machine it is, with the same name.
+            if (key.Length > 0 || machine.Length > 0)
+                entry.Devices.RemoveAll(d => (key.Length > 0 && d.Key == key) || (machine.Length > 0 && d.Machine == machine && d.Name == shown));
+            entry.Devices.Add(new Device { Hash = HashOf(token), Name = shown, Created = DateTimeOffset.UtcNow, Key = key, Machine = machine });
             while (entry.Devices.Count > MaxDevicesPerAccount) entry.Devices.RemoveAt(0);
             Save();
         }

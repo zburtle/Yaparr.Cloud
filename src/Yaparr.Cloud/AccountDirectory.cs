@@ -318,6 +318,9 @@ public sealed partial class AccountDirectory : IAccounts
         }
     }
 
+    /// <summary>The public name of a device: the start of its token's hash.</summary>
+    internal static string DeviceIdOf(string hash) => hash[..16];
+
     internal static string HashOf(string token) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
 
     /// <summary>
@@ -347,6 +350,29 @@ public sealed partial class AccountDirectory : IAccounts
         {
             Refresh();
             return _byTokenHash.GetValueOrDefault(hash);
+        }
+    }
+
+    public IReadOnlyList<DeviceInfo> DevicesOf(string name)
+    {
+        lock (_gate)
+        {
+            Refresh();
+            return _users.TryGetValue(name, out var entry)
+                ? entry.Devices.OrderByDescending(d => d.Created).Select(d => new DeviceInfo(DeviceIdOf(d.Hash), d.Name, d.Created)).ToList()
+                : new List<DeviceInfo>();
+        }
+    }
+
+    public bool RevokeDevice(string name, string deviceId)
+    {
+        if (deviceId.Length != 16) return false;
+        lock (_gate)
+        {
+            Refresh();
+            if (!_users.TryGetValue(name, out var entry) || entry.Devices.RemoveAll(d => DeviceIdOf(d.Hash) == deviceId) == 0) return false;
+            Save();
+            return true;
         }
     }
 

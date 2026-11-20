@@ -177,6 +177,11 @@ public sealed class ServiceOptions
     /// <summary>How many different addresses one connection may send to in a minute (300): enough to look for people, not to scan.</summary>
     public int GatewayDestinationsPerMinute { get; set; } = 300;
 
+    /// <summary>Connections from one address at once (10), and attempts to connect from one address in a minute (30, wrong sign-ins included): a stop to guessing tokens and to one machine taking every port.</summary>
+    public int GatewayConnectionsPerAddress { get; set; } = 10;
+
+    public int GatewayAttemptsPerMinute { get; set; } = 30;
+
     /// <summary>Connections for one account (2) and for the whole service (500) at once.</summary>
     public int GatewayConnectionsPerAccount { get; set; } = 2;
 

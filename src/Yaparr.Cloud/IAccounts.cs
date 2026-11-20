@@ -1,5 +1,8 @@
 namespace Yaparr.Cloud;
 
+/// <summary>A device signed in as an account. <see cref="Id"/> is a short public name for it (the start of its token's hash), enough to sign it out and of no use for signing in.</summary>
+public sealed record DeviceInfo(string Id, string Name, DateTimeOffset Created);
+
 /// <summary>
 /// Who may use the service: accounts named by an email address, the devices signed in as them, passwords (kept as hashes), pending sign-ups and the admin
 /// flag. Two implementations: <see cref="AccountDirectory"/> keeps them in a file, <c>PostgresAccounts</c> in a database. Both are held to the same
@@ -47,6 +50,12 @@ public interface IAccounts
 
     /// <summary>Signs one device out. False if the token was not one.</summary>
     bool RevokeToken(string token);
+
+    /// <summary>The devices signed in as an account, newest first.</summary>
+    IReadOnlyList<DeviceInfo> DevicesOf(string name);
+
+    /// <summary>Signs out one device of this account, by its <see cref="DeviceInfo.Id"/>. False if the account has no such device.</summary>
+    bool RevokeDevice(string name, string deviceId);
 
     /// <summary>Lets an account sign in to the admin portal and returns the secret for its authenticator app (new each time). Null if there is no such account or it has no password yet.</summary>
     string? MakeAdmin(string name);

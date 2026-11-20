@@ -9,12 +9,94 @@ namespace Yaparr.Cloud;
 public sealed class GatewayRegistry
 {
     private readonly ConcurrentDictionary<string, int> _connections = new();
-    private readonly ConcurrentDictionary<string, (long Day, long Bytes)> _days = new();
+    private readonly ConcurrentDictionary<string, int> _addresses = new();
+    private readonly Dictionary<string, (long Day, long Bytes)> _days = new();
     private readonly Func<DateTimeOffset> _now;
+    private readonly string? _path;
+    private long _savedAt;
+    private bool _dirty;
     private int _total;
 
-    public GatewayRegistry() : this(() => DateTimeOffset.UtcNow) { }
-    internal GatewayRegistry(Func<DateTimeOffset> now) => _now = now;
+    public GatewayRegistry() : this(() => DateTimeOffset.UtcNow, null) { }
+
+    /// <param name="path">Where the day's bytes are kept, so a restart (every deploy) does not hand everyone a new day. Accounts are kept by a short hash, not by name. Null keeps them in memory.</param>
+    internal GatewayRegistry(Func<DateTimeOffset> now, string? path = null)
+    {
+        _now = now;
+        _path = path;
+        Load();
+    }
+
+    private sealed class DayFile
+    {
+        public long Day { get; set; }
+        public Dictionary<string, long> Bytes { get; set; } = new();
+    }
+
+    private static string KeyOf(string account) => AccountDirectory.HashOf(account)[..16];
+
+    private void Load()
+    {
+        if (_path == null || !File.Exists(_path)) return;
+        try
+        {
+            var file = System.Text.Json.JsonSerializer.Deserialize<DayFile>(File.ReadAllText(_path));
+            if (file == null || file.Day != _now().ToUnixTimeSeconds() / 86400) return;     // yesterday's bytes do not count
+            foreach (var (key, bytes) in file.Bytes) _days[key] = (file.Day, bytes);
+        }
+        catch (Exception ex) when (ex is IOException or System.Text.Json.JsonException) { }
+    }
+
+    /// <summary>Writes the day's bytes. Called now and then as bytes are counted, and when the service stops.</summary>
+    public void Flush()
+    {
+        if (_path == null) return;
+        DayFile file;
+        lock (_days)
+        {
+            if (!_dirty) return;
+            var day = _now().ToUnixTimeSeconds() / 86400;
+            file = new DayFile { Day = day, Bytes = _days.Where(d => d.Value.Day == day).ToDictionary(d => d.Key, d => d.Value.Bytes) };
+            _dirty = false;
+            _savedAt = Environment.TickCount64;
+        }
+        try
+        {
+            var temp = _path + ".tmp";
+            File.WriteAllText(temp, System.Text.Json.JsonSerializer.Serialize(file));
+            File.Move(temp, _path, overwrite: true);
+        }
+        catch (IOException) { }
+    }
+
+    /// <summary>The bytes an account has used today (UTC).</summary>
+    public long UsedToday(string account)
+    {
+        var day = _now().ToUnixTimeSeconds() / 86400;
+        lock (_days) return _days.TryGetValue(KeyOf(account), out var d) && d.Day == day ? d.Bytes : 0;
+    }
+
+    /// <summary>Takes a place for one more connection from this address, if it has one. A null address (no way to tell) shares one.</summary>
+    public bool TryEnterAddress(string? address, int perAddress)
+    {
+        var key = address ?? "?";
+        lock (_addresses)
+        {
+            if (_addresses.GetValueOrDefault(key) >= perAddress) return false;
+            _addresses[key] = _addresses.GetValueOrDefault(key) + 1;
+            return true;
+        }
+    }
+
+    public void LeaveAddress(string? address)
+    {
+        var key = address ?? "?";
+        lock (_addresses)
+        {
+            if (!_addresses.TryGetValue(key, out var n)) return;
+            if (n <= 1) _addresses.TryRemove(key, out _); else _addresses[key] = n - 1;
+        }
+    }
 
     public int Total => Volatile.Read(ref _total);
 
@@ -44,13 +126,18 @@ public sealed class GatewayRegistry
     public bool TryAddBytes(string account, long bytes, long perDay)
     {
         var day = _now().ToUnixTimeSeconds() / 86400;
+        bool flush;
         lock (_days)
         {
-            var held = _days.TryGetValue(account, out var d) && d.Day == day ? d.Bytes : 0;
+            var key = KeyOf(account);
+            var held = _days.TryGetValue(key, out var d) && d.Day == day ? d.Bytes : 0;
             if (held + bytes > perDay) return false;
-            _days[account] = (day, held + bytes);
-            return true;
+            _days[key] = (day, held + bytes);
+            _dirty = true;
+            flush = _path != null && Environment.TickCount64 - _savedAt > 10_000;
         }
+        if (flush) Flush();
+        return true;
     }
 }
 
@@ -66,18 +153,28 @@ internal static class GatewayApi
     public static void MapGateway(this WebApplication app, ServiceOptions options)
     {
         app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
-        app.Map("/v1/gateway", async (HttpContext http, IAccounts accounts, GatewayRegistry registry, ILoggerFactory logs) =>
+        // What an account has used today is kept in a file, written now and then and when the service stops, so a deploy does not hand out a new day.
+        app.Lifetime.ApplicationStopping.Register(() => app.Services.GetRequiredService<GatewayRegistry>().Flush());
+        app.Map("/v1/gateway", async (HttpContext http, IAccounts accounts, GatewayRegistry registry, WakeLimiter limiter, ILoggerFactory logs) =>
         {
             if (!options.GatewayEnabled) { http.Response.StatusCode = StatusCodes.Status404NotFound; return; }
             if (!http.WebSockets.IsWebSocketRequest) { http.Response.StatusCode = StatusCodes.Status400BadRequest; return; }
+            // From one address: only so many tries in a minute (a wrong token counts), and only so many connections at once.
+            var address = http.Connection.RemoteIpAddress?.ToString();
+            if (!limiter.TryTake("gateway:" + (address ?? "?"), options.GatewayAttemptsPerMinute, 10_000)) { http.Response.StatusCode = StatusCodes.Status429TooManyRequests; return; }
             if (accounts.UserOfToken(PushApi.Bearer(http)) is not { } user) { http.Response.StatusCode = StatusCodes.Status401Unauthorized; return; }
-            if (!registry.TryEnter(user, options.GatewayConnectionsPerAccount, options.GatewayMaxConnections)) { http.Response.StatusCode = StatusCodes.Status429TooManyRequests; return; }
+            if (!registry.TryEnterAddress(address, options.GatewayConnectionsPerAddress)) { http.Response.StatusCode = StatusCodes.Status429TooManyRequests; return; }
             try
             {
-                using var socket = await http.WebSockets.AcceptWebSocketAsync();
-                await new GatewaySession(options, registry, user, socket, PublicHint(http, options), logs.CreateLogger("Gateway")).RunAsync(http.RequestAborted);
+                if (!registry.TryEnter(user, options.GatewayConnectionsPerAccount, options.GatewayMaxConnections)) { http.Response.StatusCode = StatusCodes.Status429TooManyRequests; return; }
+                try
+                {
+                    using var socket = await http.WebSockets.AcceptWebSocketAsync();
+                    await new GatewaySession(options, registry, user, socket, PublicHint(http, options), logs.CreateLogger("Gateway")).RunAsync(http.RequestAborted);
+                }
+                finally { registry.Leave(user); }
             }
-            finally { registry.Leave(user); }
+            finally { registry.LeaveAddress(address); }
         });
     }
 

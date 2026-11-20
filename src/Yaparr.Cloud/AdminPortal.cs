@@ -76,9 +76,9 @@ public static class AdminPortal
 
         // ---- the overview ----
 
-        admin.MapGet("", async (HttpContext http, IAccounts accounts, AdminSessions sessions, IBackupStore store, ISignupCodes codes) =>
+        admin.MapGet("", async (HttpContext http, IAccounts accounts, AdminSessions sessions, IBackupStore store, ISignupCodes codes, IKeepStore kept, IBlobStore pictures, GatewayRegistry gateway) =>
             Current(http, accounts, sessions) is { } session
-                ? Html(http, await DashboardAsync(session, options, accounts, store, codes))
+                ? Html(http, await DashboardAsync(session, options, accounts, store, codes, kept, pictures, gateway))
                 : Results.Redirect("/admin/login"));
 
         // ---- accounts ----
@@ -201,7 +201,7 @@ public static class AdminPortal
         return await action(session, form);
     }
 
-    private static async Task<string> DashboardAsync(AdminSession session, ServiceOptions options, IAccounts accounts, IBackupStore store, ISignupCodes codes)
+    private static async Task<string> DashboardAsync(AdminSession session, ServiceOptions options, IAccounts accounts, IBackupStore store, ISignupCodes codes, IKeepStore kept, IBlobStore pictures, GatewayRegistry gateway)
     {
         // What is stored comes in one pass, not one request for each account (backups may be in a bucket across the internet); if the store is down the page still
         // comes, with the problem in the Storage card and the backup columns marked as not available.
@@ -209,10 +209,26 @@ public static class AdminPortal
         try { summaries = await store.SummariesAsync(); }
         catch (Exception ex) when (ex is not OperationCanceledException) { }
 
-        var rows = accounts.List().Select(a =>
+        // The kept store and the pictures are each added up in one pass over their store, not one for each account (a bucket across the internet is asked once, not dozens of times). If a
+        // store cannot be read, the accounts' rows say so and the page still comes.
+        var listed = accounts.List();
+        var names = listed.Select(a => a.Name).ToList();
+        var nowUtc = DateTimeOffset.UtcNow;
+        IReadOnlyDictionary<string, long>? keptUse = null, pictureUse = null;
+        try
+        {
+            keptUse = kept.UsedBytesOf(names, nowUtc, TimeSpan.FromDays(36500));
+            pictureUse = pictures.UsedBytesOf(names, nowUtc, TimeSpan.FromDays(Math.Max(1, options.BlobKeepDays)));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { keptUse = pictureUse = null; }
+
+        var rows = listed.Select(a =>
         {
             var found = summaries?.GetValueOrDefault(BackupStore.FolderOf(a.Name));
-            return new AdminPages.AccountRow(a, found?.Versions ?? 0, found?.Bytes ?? 0, found?.Last, Known: summaries != null);
+            var use = keptUse != null && pictureUse != null
+                ? new AdminPages.AccountUse(keptUse.GetValueOrDefault(a.Name), pictureUse.GetValueOrDefault(a.Name), gateway.UsedToday(a.Name))
+                : null;
+            return new AdminPages.AccountRow(a, found?.Versions ?? 0, found?.Bytes ?? 0, found?.Last, Known: summaries != null, Use: use);
         }).ToList();
 
         // Where things are kept, and whether they answer, all asked at once.
@@ -238,6 +254,6 @@ public static class AdminPortal
             catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException) { }
         }
 
-        return AdminPages.Dashboard(session, rows, codes.List(), DateTimeOffset.UtcNow, free, total, storage);
+        return AdminPages.Dashboard(session, rows, codes.List(), DateTimeOffset.UtcNow, free, total, storage, new AdminPages.UseLimits(options.KeepQuotaBytes, options.BlobQuotaBytes, options.GatewayBytesPerDay));
     }
 }

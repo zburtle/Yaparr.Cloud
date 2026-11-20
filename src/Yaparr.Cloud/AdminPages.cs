@@ -10,7 +10,20 @@ namespace Yaparr.Cloud;
 internal static class AdminPages
 {
     /// <param name="Known">What is stored for the account could be read (it could not when the store of backups was down).</param>
-    public sealed record AccountRow(AccountEntry Account, int Versions, long Bytes, DateTimeOffset? Last, bool Known = true);
+    public sealed record AccountRow(AccountEntry Account, int Versions, long Bytes, DateTimeOffset? Last, bool Known = true, AccountUse? Use = null);
+
+    /// <summary>What an account holds against its limits besides backups: the kept store (history, emoji, GIFs), pictures left for people who are away, and the gateway today. Null when it could not be read.</summary>
+    public sealed record AccountUse(long Kept, long Pictures, long GatewayToday);
+
+    /// <summary>The limits the usage is shown against.</summary>
+    public sealed record UseLimits(long Kept, long Pictures, long GatewayPerDay);
+
+    private static string Of(long used, long limit)
+    {
+        var share = limit > 0 ? (double)used / limit : 0;
+        var text = $"{Mib(used)} <span class=\"muted\">of {Mib(limit)}</span>";
+        return share >= 0.9 ? $"<span class=\"pill warn\">{text}</span>" : text;
+    }
 
     private static string E(string? text) => Pages.E(text);
 
@@ -245,7 +258,7 @@ internal static class AdminPages
     };
 
     public static string Dashboard(AdminSession session, IReadOnlyList<AccountRow> rows, IReadOnlyList<SignupCodeInfo> codes, DateTimeOffset now, long? diskFree, long? diskTotal,
-        IReadOnlyList<(string Label, StoreStatus Status)>? storage = null)
+        IReadOnlyList<(string Label, StoreStatus Status)>? storage = null, UseLimits? limits = null)
     {
         var token = Token(session.Csrf);
 
@@ -257,11 +270,16 @@ internal static class AdminPages
             var backup = !row.Known ? "<span class=\"muted\">Not available</span>"
                 : row.Versions == 0 ? "<span class=\"muted\">No backup</span>"
                 : $"{Mib(row.Bytes)} <span class=\"muted\">· {Plural(row.Versions, "version")}, {row.Last:yyyy-MM-dd HH:mm}</span>";
+            var unknown = "<span class=\"muted\">Not available</span>";
+            var l = limits ?? new UseLimits(0, 0, 0);
             accountRows.Append($"""
                 <tr>
                 <td><span class="name">{E(a.Name)}</span>{(a.IsAdmin ? "<span class=\"pill admin\">Admin</span>" : "")}</td>
                 <td>{E(state)}</td>
                 <td>{backup}</td>
+                <td>{(row.Use is { } u ? Of(u.Kept, l.Kept) : unknown)}</td>
+                <td>{(row.Use is { } p ? Of(p.Pictures, l.Pictures) : unknown)}</td>
+                <td>{(row.Use is { } g ? Of(g.GatewayToday, l.GatewayPerDay) : unknown)}</td>
                 <td class="muted">{a.Created:yyyy-MM-dd}</td>
                 <td class="actions">
                 <form method="post" action="/admin/accounts/password">{token}<input type="hidden" name="name" value="{E(a.Name)}"><button class="btn secondary small" type="submit" aria-label="Reset the password of {E(a.Name)}">Reset password</button></form>
@@ -333,10 +351,10 @@ internal static class AdminPages
             """)}
 
             <section class="card">
-            <header><div><h2>Accounts</h2><p class="muted small">Backups are locked on each person's device: nothing here can read one.</p></div></header>
+            <header><div><h2>Accounts</h2><p class="muted small">Backups are locked on each person's device: nothing here can read one. The columns after Backup are what each account holds against its limits (kept in sync, pictures left for people who are away, and the gateway today); amber is over nine tenths.</p></div></header>
             {(rows.Count == 0 ? "<div class=\"empty\">No accounts yet.</div>" : $"""
             <div class="scroll"><table>
-            <thead><tr><th>Account</th><th>State</th><th>Backup</th><th>Made</th><th></th></tr></thead>
+            <thead><tr><th>Account</th><th>State</th><th>Backup</th><th>Kept in sync</th><th>Pictures left</th><th>Gateway today</th><th>Made</th><th></th></tr></thead>
             <tbody>
             {accountRows}
             </tbody></table></div>

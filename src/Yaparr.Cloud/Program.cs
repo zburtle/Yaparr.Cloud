@@ -22,7 +22,7 @@ var builder = WebApplication.CreateBuilder(args);
 var options = builder.Configuration.GetSection("Service").Get<ServiceOptions>() ?? new ServiceOptions();
 Stores.CheckRemoteStorage(options);
 builder.Services.AddSingleton(options);
-builder.Services.AddSingleton<GatewayRegistry>();
+builder.Services.AddSingleton(_ => new GatewayRegistry(() => DateTimeOffset.UtcNow, Path.Combine(Path.GetFullPath(options.DataDirectory), "gateway-usage.json")));
 builder.Services.AddSingleton<IBackupStore>(_ => Stores.Backups(options));
 builder.Services.AddSingleton<IAccounts>(_ => Stores.Accounts(options));
 builder.Services.AddSingleton<ISignupCodes>(_ => Stores.Codes(options));
@@ -264,6 +264,7 @@ app.MapMailbox(options);
 app.MapBlobs(options);
 app.MapKeep(options);
 app.MapGateway(options);
+app.MapAccountApi(options);
 
 // ---- the backup, for an app that is signed in (Authorization: Bearer <token>) ----
 

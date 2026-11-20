@@ -118,6 +118,34 @@ public abstract class StoreContractTests : IDisposable
     }
 
     [SkippableFact]
+    public void An_account_lists_its_devices_newest_first_and_signs_one_out_by_its_id_and_only_its_own()
+    {
+        var accounts = NewAccounts();
+        accounts.Add("sam@example.com", Password);
+        accounts.Add("kim@example.com", Password);
+        var phone = accounts.IssueToken("sam@example.com", "phone")!;
+        System.Threading.Thread.Sleep(20);
+        var laptop = accounts.IssueToken("sam@example.com", "laptop")!;
+        var kim = accounts.IssueToken("kim@example.com", "tablet")!;
+
+        var devices = accounts.DevicesOf("sam@example.com");
+        Assert.Equal(new[] { "laptop", "phone" }, devices.Select(d => d.Name));
+        Assert.All(devices, d => Assert.Equal(16, d.Id.Length));
+        Assert.Equal(AccountDirectory.DeviceIdOf(AccountDirectory.HashOf(laptop)), devices[0].Id);
+        Assert.Empty(accounts.DevicesOf("nobody@example.com"));
+
+        Assert.False(accounts.RevokeDevice("kim@example.com", devices[1].Id));         // another account's device
+        Assert.False(accounts.RevokeDevice("sam@example.com", "0123456789abcdef"));      // no such device
+        Assert.False(accounts.RevokeDevice("sam@example.com", "short"));
+        Assert.Equal("sam@example.com", accounts.UserOfToken(phone));
+        Assert.True(accounts.RevokeDevice("sam@example.com", devices[1].Id));
+        Assert.Null(accounts.UserOfToken(phone));
+        Assert.Equal("sam@example.com", accounts.UserOfToken(laptop));
+        Assert.Equal("kim@example.com", accounts.UserOfToken(kim));
+        Assert.Equal(new[] { "laptop" }, accounts.DevicesOf("sam@example.com").Select(d => d.Name));
+    }
+
+    [SkippableFact]
     public void No_token_is_made_for_an_account_that_is_not_there_and_only_a_hash_of_one_is_kept()
     {
         var accounts = NewAccounts();

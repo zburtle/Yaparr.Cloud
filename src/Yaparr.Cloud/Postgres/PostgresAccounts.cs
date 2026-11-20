@@ -185,6 +185,20 @@ public sealed class PostgresAccounts : IAccounts
         return Scalar<string>("select account from devices where token_hash = @h", ("h", AccountDirectory.HashOf(token)));
     }
 
+    public IReadOnlyList<DeviceInfo> DevicesOf(string name)
+    {
+        using var c = _db.OpenConnection();
+        using var command = new NpgsqlCommand("select token_hash, name, created from devices where account = @n order by created desc, token_hash", c);
+        command.Parameters.AddWithValue("n", name);
+        using var reader = command.ExecuteReader();
+        var devices = new List<DeviceInfo>();
+        while (reader.Read()) devices.Add(new DeviceInfo(AccountDirectory.DeviceIdOf(reader.GetString(0)), reader.GetString(1), reader.GetFieldValue<DateTimeOffset>(2)));
+        return devices;
+    }
+
+    public bool RevokeDevice(string name, string deviceId) =>
+        deviceId.Length == 16 && Run("delete from devices where account = @n and left(token_hash, 16) = @i", ("n", name), ("i", deviceId)) >= 1;
+
     public bool RevokeToken(string token) => Run("delete from devices where token_hash = @h", ("h", AccountDirectory.HashOf(token))) == 1;
 
     public string? MakeAdmin(string name) =>

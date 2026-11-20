@@ -1,3 +1,4 @@
+using System.Net.Http.Json;
 using System.Net;
 using System.Net.Sockets;
 using System.Net.WebSockets;
@@ -223,5 +224,98 @@ public sealed class GatewayLimitsTests
         Assert.True(options.GatewayBytesPerSecond * 4 < smallestScreenShareBytesPerSecond);
         // A day's bytes allow about 8 hours of one-to-one voice in both directions.
         Assert.True(options.GatewayBytesPerDay >= 2 * voiceToOnePersonBytesPerSecond * 8 * 3600);
+    }
+}
+
+public sealed class AccountApiTests : ServiceTest
+{
+    [Fact]
+    public async Task A_device_sees_the_devices_of_its_account_marks_itself_and_signs_another_out()
+    {
+        var client = Start();
+        var accounts = new AccountDirectory(Options);
+        accounts.Add("sam@example.com", Password);
+        var phone = accounts.IssueToken("sam@example.com", "phone")!;
+        var laptop = accounts.IssueToken("sam@example.com", "laptop")!;
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Send(client, null, HttpMethod.Get, "/v1/devices")).StatusCode);
+        var listing = await (await Send(client, phone, HttpMethod.Get, "/v1/devices")).Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        var devices = listing.GetProperty("devices").EnumerateArray().ToList();
+        Assert.Equal(2, devices.Count);
+        var current = Assert.Single(devices, d => d.GetProperty("current").GetBoolean());
+        Assert.Equal("phone", current.GetProperty("name").GetString());
+        var other = Assert.Single(devices, d => !d.GetProperty("current").GetBoolean());
+
+        Assert.Equal(HttpStatusCode.NoContent, (await Send(client, phone, HttpMethod.Delete, "/v1/devices/" + other.GetProperty("id").GetString())).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Send(client, laptop, HttpMethod.Get, "/v1/devices")).StatusCode);       // signed out
+        Assert.Equal(HttpStatusCode.NotFound, (await Send(client, phone, HttpMethod.Delete, "/v1/devices/" + other.GetProperty("id").GetString())).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Send(client, null, HttpMethod.Delete, "/v1/devices/0123456789abcdef")).StatusCode);
+    }
+
+    [Fact]
+    public async Task What_an_account_holds_is_reported_against_its_limits()
+    {
+        var client = Start(new() { ["GatewayEnabled"] = "true" });
+        var token = Register("sam@example.com");
+        var pieceData = System.Security.Cryptography.RandomNumberGenerator.GetBytes(1000);
+        var pictureData = System.Security.Cryptography.RandomNumberGenerator.GetBytes(500);
+        Assert.Equal(HttpStatusCode.OK, (await Send(client, token, HttpMethod.Put, "/v1/keep/" + BlobRules.IdOf(pieceData), pieceData)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await Send(client, token, HttpMethod.Put, "/v1/blob/" + BlobRules.IdOf(pictureData), pictureData)).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await Send(client, token, HttpMethod.Put, "/v1/backup", Locked(2000), ifMatch: 0)).StatusCode);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Send(client, null, HttpMethod.Get, "/v1/usage")).StatusCode);
+        var response = await Send(client, token, HttpMethod.Get, "/v1/usage");
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+        var usage = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        Assert.Equal(1000, usage.GetProperty("kept").GetProperty("usedBytes").GetInt64());
+        Assert.Equal(new ServiceOptions().KeepQuotaBytes, usage.GetProperty("kept").GetProperty("quotaBytes").GetInt64());
+        Assert.Equal(500, usage.GetProperty("pictures").GetProperty("usedBytes").GetInt64());
+        Assert.Equal(1, usage.GetProperty("backups").GetProperty("count").GetInt32());
+        Assert.Equal(2000, usage.GetProperty("backups").GetProperty("bytes").GetInt64());
+        Assert.True(usage.GetProperty("gateway").GetProperty("enabled").GetBoolean());
+        Assert.Equal(0, usage.GetProperty("gateway").GetProperty("usedTodayBytes").GetInt64());
+    }
+}
+
+public sealed class GatewayLimitsKeptTests : IDisposable
+{
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), "yaparr-gwusage-" + Guid.NewGuid().ToString("N"));
+
+    public void Dispose() { try { Directory.Delete(_dir, true); } catch (IOException) { } }
+
+    [Fact]
+    public void The_days_bytes_survive_a_restart_and_start_over_the_next_day()
+    {
+        Directory.CreateDirectory(_dir);
+        var path = Path.Combine(_dir, "gateway-usage.json");
+        var now = new DateTimeOffset(2026, 11, 19, 12, 0, 0, TimeSpan.Zero);
+        var first = new GatewayRegistry(() => now, path);
+        Assert.True(first.TryAddBytes("sam@example.com", 700, 1000));
+        first.Flush();
+        Assert.DoesNotContain("sam@example.com", File.ReadAllText(path));      // kept by a short hash, not by name
+
+        var restarted = new GatewayRegistry(() => now, path);
+        Assert.Equal(700, restarted.UsedToday("sam@example.com"));
+        Assert.False(restarted.TryAddBytes("sam@example.com", 400, 1000));      // the day's limit still counts what was used before the restart
+        Assert.Equal(0, restarted.UsedToday("alex@example.com"));
+
+        now = now.AddDays(1);
+        Assert.Equal(0, restarted.UsedToday("sam@example.com"));
+        Assert.Equal(0, new GatewayRegistry(() => now, path).UsedToday("sam@example.com"));      // and a restart the next day starts clean
+        Assert.True(restarted.TryAddBytes("sam@example.com", 1000, 1000));
+    }
+
+    [Fact]
+    public void An_address_has_only_so_many_connections_at_once()
+    {
+        var registry = new GatewayRegistry();
+        Assert.True(registry.TryEnterAddress("203.0.113.9", 2));
+        Assert.True(registry.TryEnterAddress("203.0.113.9", 2));
+        Assert.False(registry.TryEnterAddress("203.0.113.9", 2));
+        Assert.True(registry.TryEnterAddress("203.0.113.10", 2));
+        registry.LeaveAddress("203.0.113.9");
+        Assert.True(registry.TryEnterAddress("203.0.113.9", 2));
+        Assert.True(registry.TryEnterAddress(null, 1));
+        Assert.False(registry.TryEnterAddress(null, 1));
     }
 }

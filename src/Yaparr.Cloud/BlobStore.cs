@@ -25,6 +25,9 @@ public interface IBlobStore
 
     /// <summary>Removes one blob, if this account uploaded it. False when there is none, or it is another account's.</summary>
     bool Remove(string id, string account);
+
+    /// <summary>The bytes the account holds in blobs that have not expired (what its quota counts).</summary>
+    long UsedBytes(string account, DateTimeOffset now, TimeSpan keep);
 }
 
 /// <summary>
@@ -108,6 +111,11 @@ public class BlobStore : IBlobStore
             File.WriteAllText(MetaPath(id), JsonSerializer.Serialize(new Meta { Account = account, Size = data.Length, At = now }, Json));
             return BlobPutOutcome.Stored;
         }
+    }
+
+    public long UsedBytes(string account, DateTimeOffset now, TimeSpan keep)
+    {
+        lock (_gate) return All().Where(b => b.Meta.Account == account && b.Meta.At >= now - keep).Sum(b => b.Meta.Size);
     }
 
     public byte[]? Get(string id, DateTimeOffset now, TimeSpan keep)

@@ -174,6 +174,13 @@ public class S3BlobStore : IBlobStore
         return gone.Count;
     }
 
+    public long UsedBytes(string account, DateTimeOffset now, TimeSpan keep)
+    {
+        var owner = BackupStore.FolderOf(account);
+        var cutoff = Seconds(now - keep);
+        return List(AccountPrefix(owner)).Where(e => e.At >= cutoff).Sum(e => e.Size);
+    }
+
     public bool Remove(string id, string account)
     {
         if (!BlobRules.GoodId(id)) return false;

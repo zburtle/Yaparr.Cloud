@@ -160,13 +160,16 @@ public sealed class ServiceOptions
     /// <summary>Whether the service carries UDP datagrams for devices on networks that block UDP. Off by default: it uses the service's bandwidth.</summary>
     public bool GatewayEnabled { get; set; }
 
-    /// <summary>The speed an account's connection may send and receive at, in bytes a second (4096), and how much it may send at once (65536). Chat fits; voice and screen sharing do not.</summary>
-    public int GatewayBytesPerSecond { get; set; } = 4096;
+    /// <summary>
+    /// The speed an account's connection may send and receive at, in bytes a second (24576, about 196 kbit/s), and how much it may send at once (131072). Chat and voice fit (a voice
+    /// is about 90 kbit/s on the wire for each person it goes to, so talking to two people fits); screen sharing, which needs several times that, does not.
+    /// </summary>
+    public int GatewayBytesPerSecond { get; set; } = 24_576;
 
-    public int GatewayBurstBytes { get; set; } = 65_536;
+    public int GatewayBurstBytes { get; set; } = 131_072;
 
-    /// <summary>The bytes an account may send and receive in a day (52428800, 50 MiB).</summary>
-    public long GatewayBytesPerDay { get; set; } = 52_428_800;
+    /// <summary>The bytes an account may send and receive in a day (2147483648, 2 GiB): about 8 hours of one-to-one voice, both ways.</summary>
+    public long GatewayBytesPerDay { get; set; } = 2_147_483_648;
 
     /// <summary>The largest datagram carried, in bytes (1400).</summary>
     public int GatewayMaxPacket { get; set; } = 1400;

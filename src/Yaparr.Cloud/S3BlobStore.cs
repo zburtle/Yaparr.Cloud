@@ -181,6 +181,16 @@ public class S3BlobStore : IBlobStore
         return List(AccountPrefix(owner)).Where(e => e.At >= cutoff).Sum(e => e.Size);
     }
 
+    public IReadOnlyDictionary<string, long> UsedBytesOf(IEnumerable<string> accounts, DateTimeOffset now, TimeSpan keep)
+    {
+        // One listing of the whole index (a request for each thousand entries), added up by the account's folder: not a listing for each account.
+        var cutoff = Seconds(now - keep);
+        var held = new Dictionary<string, long>();
+        foreach (var e in List(_prefix + "index/"))
+            if (e.At >= cutoff) held[e.Account] = held.GetValueOrDefault(e.Account) + e.Size;
+        return accounts.Distinct().ToDictionary(a => a, a => held.GetValueOrDefault(BackupStore.FolderOf(a)));
+    }
+
     public bool Remove(string id, string account)
     {
         if (!BlobRules.GoodId(id)) return false;

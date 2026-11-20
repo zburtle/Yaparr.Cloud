@@ -28,6 +28,9 @@ public interface IBlobStore
 
     /// <summary>The bytes the account holds in blobs that have not expired (what its quota counts).</summary>
     long UsedBytes(string account, DateTimeOffset now, TimeSpan keep);
+
+    /// <summary><see cref="UsedBytes"/> for each of these accounts, from one pass over the store rather than one for each account (what the admin overview uses). An account with nothing is 0.</summary>
+    IReadOnlyDictionary<string, long> UsedBytesOf(IEnumerable<string> accounts, DateTimeOffset now, TimeSpan keep);
 }
 
 /// <summary>
@@ -116,6 +119,16 @@ public class BlobStore : IBlobStore
     public long UsedBytes(string account, DateTimeOffset now, TimeSpan keep)
     {
         lock (_gate) return All().Where(b => b.Meta.Account == account && b.Meta.At >= now - keep).Sum(b => b.Meta.Size);
+    }
+
+    public IReadOnlyDictionary<string, long> UsedBytesOf(IEnumerable<string> accounts, DateTimeOffset now, TimeSpan keep)
+    {
+        var wanted = accounts.ToHashSet();
+        var held = new Dictionary<string, long>();
+        lock (_gate)
+            foreach (var (_, meta) in All())
+                if (meta.At >= now - keep && wanted.Contains(meta.Account)) held[meta.Account] = held.GetValueOrDefault(meta.Account) + meta.Size;
+        return wanted.ToDictionary(a => a, a => held.GetValueOrDefault(a));
     }
 
     public byte[]? Get(string id, DateTimeOffset now, TimeSpan keep)

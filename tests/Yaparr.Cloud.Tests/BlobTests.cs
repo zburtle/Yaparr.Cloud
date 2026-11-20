@@ -53,6 +53,29 @@ public abstract class BlobStoreContractTests : IDisposable
     }
 
     [SkippableFact]
+    public void The_bytes_of_many_accounts_come_in_one_pass_and_match_those_counted_one_by_one()
+    {
+        var store = NewStore();
+        var (a, da) = Blob(300);
+        var (b, db) = Blob(200);
+        var (c, dc) = Blob(100);
+        store.Put(a, "sam@example.com", da, 1000, T0, Keep);
+        store.Put(b, "sam@example.com", db, 1000, T0, Keep);
+        store.Put(c, "alex@example.com", dc, 1000, T0, Keep);
+        var names = new[] { "sam@example.com", "alex@example.com", "nobody@example.com" };
+
+        var together = store.UsedBytesOf(names, T0, Keep);
+        Assert.Equal(500, together["sam@example.com"]);
+        Assert.Equal(100, together["alex@example.com"]);
+        Assert.Equal(0, together["nobody@example.com"]);
+        foreach (var name in names) Assert.Equal(store.UsedBytes(name, T0, Keep), together[name]);
+
+        // Expired blobs do not count, as when counted one by one.
+        var later = T0 + Keep + TimeSpan.FromMinutes(1);
+        Assert.All(store.UsedBytesOf(names, later, Keep).Values, bytes => Assert.Equal(0, bytes));
+    }
+
+    [SkippableFact]
     public void A_blob_goes_after_the_keeping_time_and_a_sweep_removes_what_has_expired()
     {
         var store = NewStore();

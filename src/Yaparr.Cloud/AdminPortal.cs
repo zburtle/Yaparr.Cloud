@@ -209,17 +209,25 @@ public static class AdminPortal
         try { summaries = await store.SummariesAsync(); }
         catch (Exception ex) when (ex is not OperationCanceledException) { }
 
-        var rows = accounts.List().Select(a =>
+        // The kept store and the pictures are each added up in one pass over their store, not one for each account (a bucket across the internet is asked once, not dozens of times). If a
+        // store cannot be read, the accounts' rows say so and the page still comes.
+        var listed = accounts.List();
+        var names = listed.Select(a => a.Name).ToList();
+        var nowUtc = DateTimeOffset.UtcNow;
+        IReadOnlyDictionary<string, long>? keptUse = null, pictureUse = null;
+        try
+        {
+            keptUse = kept.UsedBytesOf(names, nowUtc, TimeSpan.FromDays(36500));
+            pictureUse = pictures.UsedBytesOf(names, nowUtc, TimeSpan.FromDays(Math.Max(1, options.BlobKeepDays)));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { keptUse = pictureUse = null; }
+
+        var rows = listed.Select(a =>
         {
             var found = summaries?.GetValueOrDefault(BackupStore.FolderOf(a.Name));
-            // The kept store and the pictures are counted for each account; if one cannot be read the account's row says so and the page still comes.
-            AdminPages.AccountUse? use = null;
-            try
-            {
-                var now = DateTimeOffset.UtcNow;
-                use = new AdminPages.AccountUse(kept.UsedBytes(a.Name, now, TimeSpan.FromDays(36500)), pictures.UsedBytes(a.Name, now, TimeSpan.FromDays(Math.Max(1, options.BlobKeepDays))), gateway.UsedToday(a.Name));
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException) { }
+            var use = keptUse != null && pictureUse != null
+                ? new AdminPages.AccountUse(keptUse.GetValueOrDefault(a.Name), pictureUse.GetValueOrDefault(a.Name), gateway.UsedToday(a.Name))
+                : null;
             return new AdminPages.AccountRow(a, found?.Versions ?? 0, found?.Bytes ?? 0, found?.Last, Known: summaries != null, Use: use);
         }).ToList();
 

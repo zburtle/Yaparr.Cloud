@@ -128,6 +128,31 @@ public sealed partial class AccountDirectory : IAccounts
         lock (_gate) { Refresh(); return _users.TryGetValue(name, out var entry) && entry.PasswordHash != null; }
     }
 
+    public string? StartPending(string name, TimeSpan lifetime)
+    {
+        var token = "set_" + Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));
+        lock (_gate)
+        {
+            Refresh();
+            if (!_users.TryGetValue(name, out var entry))
+                _users[name] = entry = new Entry { Created = DateTimeOffset.UtcNow, Pass = AccountPlan.None };
+            else if (entry.PasswordHash != null || entry.Pass != AccountPlan.None) return null;
+            entry.SetupHash = HashOf(token);
+            entry.SetupExpires = DateTimeOffset.UtcNow + lifetime;
+            Save();
+        }
+        return token;
+    }
+
+    public IReadOnlyList<string> ExpiredPending(DateTimeOffset now)
+    {
+        lock (_gate)
+        {
+            Refresh();
+            return _users.Where(u => u.Value.PasswordHash == null && u.Value.Pass == AccountPlan.None && !u.Value.Admin && (u.Value.SetupExpires is not { } ends || ends < now)).Select(u => u.Key).ToList();
+        }
+    }
+
     public string? PassOf(string name)
     {
         lock (_gate) { Refresh(); return _users.TryGetValue(name, out var entry) ? entry.Pass : null; }

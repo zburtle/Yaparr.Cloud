@@ -66,6 +66,27 @@ public sealed class PostgresAccounts : IAccounts
 
     public bool HasPassword(string name) => Scalar<bool?>("select password_hash is not null from accounts where name = @n", ("n", name)) == true;
 
+    public string? StartPending(string name, TimeSpan lifetime)
+    {
+        var token = "set_" + System.Buffers.Text.Base64Url.EncodeToString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        var made = Scalar<string>("""
+            insert into accounts (name, created, pass, setup_hash, setup_expires) values (@n, @c, 'none', @h, @e)
+            on conflict (name) do update set setup_hash = excluded.setup_hash, setup_expires = excluded.setup_expires where accounts.password_hash is null and accounts.pass = 'none'
+            returning name
+            """, ("n", name), ("c", DateTimeOffset.UtcNow), ("h", AccountDirectory.HashOf(token)), ("e", DateTimeOffset.UtcNow + lifetime));
+        return made == null ? null : token;
+    }
+
+    public IReadOnlyList<string> ExpiredPending(DateTimeOffset now)
+    {
+        using var command = _db.CreateCommand("select name from accounts where password_hash is null and pass = 'none' and not is_admin and (setup_expires is null or setup_expires < @now)");
+        command.Parameters.AddWithValue("now", now);
+        using var reader = command.ExecuteReader();
+        var list = new List<string>();
+        while (reader.Read()) list.Add(reader.GetString(0));
+        return list;
+    }
+
     public string? PassOf(string name) => Scalar<string>("select pass from accounts where name = @n", ("n", name));
 
     public bool SetPass(string name, string pass) => AccountPlan.IsPass(pass) && Run("update accounts set pass = @p where name = @n", ("p", pass), ("n", name)) == 1;

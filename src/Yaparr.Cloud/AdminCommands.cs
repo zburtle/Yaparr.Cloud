@@ -238,11 +238,15 @@ public static class AdminCommands
                 if (rest.Count == 0) { output.Write(Usage); return 2; }
                 var name = AccountDirectory.Normalize(rest[0]);
                 var keep = rest.Contains("--keep-backup");
+                // What it is paying for is a provider's to end, and this command has no provider: say so afterwards, while the ids are still known.
+                var paying = name == null ? new List<Subscription>() : Stores.Subscriptions(options).Of(name).Where(s => s.Status != SubscriptionStatus.Ended).ToList();
                 // The devices registered to be woken and the synced records go with the account.
                 var erased = name == null ? (Existed: false, HadBackup: false)
                     : await AccountErasure.EraseAsync(name, accounts, store, Stores.Push(options), Stores.Sync(options), keep, mailbox: Stores.Mailbox(options), blobs: Stores.Blobs(options), kept: Stores.Keep(options), subscriptions: Stores.Subscriptions(options));
                 if (!erased.Existed) { output.WriteLine("There is no such account."); return 1; }
                 output.WriteLine($"Removed the account {name}.");
+                if (paying.Count > 0)
+                    output.WriteLine($"It was paying for {paying.Count} subscription{(paying.Count == 1 ? "" : "s")} at {string.Join(", ", paying.Select(s => s.Provider).Distinct())}: cancel {(paying.Count == 1 ? "it" : "them")} there ({string.Join(", ", paying.Select(s => s.ProviderSubscriptionId))}) so that it is not charged again. Deleting from the account page or the admin portal does this itself.");
                 if (keep) output.WriteLine("Its backup was kept. Making an account with the same name again reaches it.");
                 else output.WriteLine(erased.HadBackup ? "Its backup was deleted." : "It had no backup.");
                 return 0;

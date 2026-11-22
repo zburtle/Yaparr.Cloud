@@ -37,6 +37,20 @@ public sealed class PostgresSubscriptions(NpgsqlDataSource db) : ISubscriptions
         return list;
     }
 
+    public IReadOnlyList<Subscription> Stale(DateTimeOffset updatedBefore, DateTimeOffset periodEndedBefore)
+    {
+        using var command = db.CreateCommand("select account, provider, provider_subscription_id, provider_customer_id, plan, status, period_end, updated from subscriptions where status <> @ended and (updated < @u or period_end < @p)");
+        command.Parameters.AddWithValue("ended", (int)SubscriptionStatus.Ended);
+        command.Parameters.AddWithValue("u", updatedBefore);
+        command.Parameters.AddWithValue("p", periodEndedBefore);
+        using var reader = command.ExecuteReader();
+        var list = new List<Subscription>();
+        while (reader.Read())
+            list.Add(new Subscription(reader.GetString(0), reader.GetString(1), reader.GetString(3), reader.GetString(2), reader.GetString(4), (SubscriptionStatus)reader.GetInt32(5),
+                reader.GetFieldValue<DateTimeOffset>(6), reader.GetFieldValue<DateTimeOffset>(7)));
+        return list;
+    }
+
     public string BillingIdOf(string account)
     {
         // Two callers asking at once both end up with the one id that got in first.

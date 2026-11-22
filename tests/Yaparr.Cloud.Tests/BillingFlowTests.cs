@@ -570,6 +570,51 @@ public sealed class BillingApiTests : ServiceTest
     }
 
     [Fact]
+    public async Task An_address_that_has_paid_and_not_chosen_a_password_is_not_sent_to_pay_again_and_its_link_is_not_replaced()
+    {
+        var client = Run();
+        var (email, token, billingId) = await StartPaying(client);
+        Paid(billingId);
+        Assert.Equal(HttpStatusCode.OK, (await Hook(client, "evt_1")).StatusCode);
+        var checkouts = _fake.Checkouts.Count;
+
+        // Someone types the address again (the payer who closed the page, or anyone else): nothing is started and the payer's link still works.
+        var again = await Form(client, "/billing/start", ("email", email));
+        Assert.Equal(HttpStatusCode.Conflict, again.StatusCode);
+        Assert.Contains("already paid", await again.Content.ReadAsStringAsync());
+        Assert.Equal(checkouts, _fake.Checkouts.Count);
+        var page = await client.GetAsync("/billing/done?t=" + Uri.EscapeDataString(token));
+        Assert.Contains("name=\"password\"", await page.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task A_sign_up_code_does_not_take_over_an_address_that_has_paid_and_not_chosen_a_password()
+    {
+        var client = Run();
+        var (email, token, billingId) = await StartPaying(client);
+        Paid(billingId);
+        await Hook(client, "evt_1");
+        var code = new SignupCodes(Options).Create("", null, null).Code;
+
+        var response = await client.PostAsync("/signup", new FormUrlEncodedContent(new Dictionary<string, string> { ["code"] = code, ["email"] = email }));
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.DoesNotContain("name=\"token\"", await response.Content.ReadAsStringAsync());
+        Assert.Equal(email, new AccountDirectory(Options).SetupFor(token));   // the payer's link is untouched
+    }
+
+    [Fact]
+    public async Task An_address_that_paid_and_has_a_password_is_sent_to_sign_in()
+    {
+        var client = Run();
+        Register(Sam);
+        new SubscriptionStore(Options).Upsert(new Subscription(Sam, "fake", "cus_1", "sub_1", "cloud", SubscriptionStatus.Active, DateTimeOffset.UtcNow.AddDays(10), DateTimeOffset.UtcNow));
+        var response = await Form(client, "/billing/start", ("email", Sam));
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Contains("/account/subscription", await response.Content.ReadAsStringAsync());
+        Assert.Empty(_fake.Checkouts);
+    }
+
+    [Fact]
     public async Task A_made_up_address_is_refused_and_so_is_trying_over_and_over_from_one_place()
     {
         var client = Run();

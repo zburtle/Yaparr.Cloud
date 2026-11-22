@@ -51,7 +51,8 @@ internal sealed class FakeBilling(string name = "fake") : IBillingProvider
     {
         if (!headers.TryGetValue("x-fake-signature", out var signature) || signature != "valid") throw new BadSignatureException("not signed");
         var json = JsonSerializer.Deserialize<JsonElement>(rawBody.Span);
-        return new BillingEvent(json.GetProperty("id").GetString()!, json.TryGetProperty("subscription", out var sub) ? sub.GetString() : null, null);
+        return new BillingEvent(json.GetProperty("id").GetString()!, json.TryGetProperty("subscription", out var sub) ? sub.GetString() : null, null,
+            EndIt: json.TryGetProperty("end", out var end) && end.GetBoolean());
     }
 
     public Task<SubscriptionState?> GetSubscriptionAsync(string providerSubscriptionId, CancellationToken cancel)
@@ -71,6 +72,8 @@ internal sealed class FakeBilling(string name = "fake") : IBillingProvider
     {
         Reach();
         Cancelled.Add((providerSubscriptionId, immediately));
+        // As a provider does: an ended one reports itself ended.
+        if (immediately && States.TryGetValue(providerSubscriptionId, out var held)) States[providerSubscriptionId] = held with { Status = SubscriptionStatus.Ended };
         return Task.CompletedTask;
     }
 }

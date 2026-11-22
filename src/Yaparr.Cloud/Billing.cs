@@ -134,8 +134,12 @@ public enum BillingInterval { Monthly, Yearly }
 /// <summary>What is needed to send someone to pay. <see cref="AccountRef"/> is the account's random billing id: the provider stores it as its reference for the person, and never the email.</summary>
 public sealed record CheckoutRequest(string AccountRef, string Email, string Plan, BillingInterval Interval, Uri SuccessUrl, Uri ReturnUrl);
 
-/// <summary>What a webhook is about. It carries no state: the service asks the provider for that (<see cref="IBillingProvider.GetSubscriptionAsync"/>).</summary>
-public sealed record BillingEvent(string EventId, string? ProviderSubscriptionId, string? AccountRef);
+/// <summary>
+/// What a webhook is about. It carries no state: the service asks the provider for that (<see cref="IBillingProvider.GetSubscriptionAsync"/>). <see cref="EndIt"/> is for the one thing
+/// a provider does not do by itself: money was given back for the subscription (a refund), which the design says ends it, but providers leave the subscription running. The service
+/// then ends it at the provider (<see cref="IBillingProvider.CancelAsync"/>, at once) before it looks.
+/// </summary>
+public sealed record BillingEvent(string EventId, string? ProviderSubscriptionId, string? AccountRef, bool EndIt = false);
 
 /// <summary>A subscription as the provider says it stands now, in the service's own terms.</summary>
 public sealed record SubscriptionState(string ProviderCustomerId, string ProviderSubscriptionId, string AccountRef, string Plan, SubscriptionStatus Status,

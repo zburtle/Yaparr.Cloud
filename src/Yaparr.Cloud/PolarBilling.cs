@@ -133,6 +133,10 @@ public sealed class PolarBilling(PolarOptions options, HttpClient http, Func<Dat
         // What to look at, and nothing else: the state itself is asked for from Polar.
         if (type.StartsWith("subscription.", StringComparison.Ordinal))
             return new BillingEvent(id, Text(data, "id"), data.TryGetProperty("customer", out var c) && c.ValueKind == JsonValueKind.Object ? Text(c, "external_id") : null);
+        // A refund that went through ends the subscription (the design's rule: money back means over). Not one that only corrects tax.
+        if (type is "refund.created" or "refund.updated")
+            return new BillingEvent(id, Text(data, "subscription_id"), null,
+                EndIt: Text(data, "status") == "succeeded" && Text(data, "reason") is not ("tax_refund" or "vat_reverse_charge_correction"));
         if (type.StartsWith("customer.", StringComparison.Ordinal))
             return new BillingEvent(id, null, Text(data, "external_id"));
         return new BillingEvent(id, null, null);

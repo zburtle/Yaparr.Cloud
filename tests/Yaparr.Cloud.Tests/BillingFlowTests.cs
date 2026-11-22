@@ -62,6 +62,46 @@ public sealed class BillingServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task A_refund_ends_the_subscription_at_the_provider_and_then_the_service_looks_and_finds_it_over()
+    {
+        var id = Sam();
+        _accounts.SetPass("sam@example.com", AccountPlan.None);
+        _fake.States["sub_1"] = State(id);
+        await _billing.HandleWebhookAsync("fake", Signed, Event("evt_1"), default);
+        Assert.Equal(PlanState.Subscribed, new PlanGate(_options, _accounts, _store, () => _now).StateOf("sam@example.com"));
+
+        var refund = Encoding.UTF8.GetBytes("""{"id":"evt_2","subscription":"sub_1","end":true}""");
+        Assert.Equal(WebhookOutcome.Handled, await _billing.HandleWebhookAsync("fake", Signed, refund, default));
+
+        Assert.Equal(("sub_1", true), Assert.Single(_fake.Cancelled));
+        Assert.Equal(SubscriptionStatus.Ended, _store.Of("sam@example.com").Single().Status);
+        Assert.Equal(PlanState.Lapsed, new PlanGate(_options, _accounts, _store, () => _now).StateOf("sam@example.com"));
+    }
+
+    [Fact]
+    public async Task A_refund_that_cannot_be_acted_on_now_is_tried_again_and_not_taken_for_a_repeat()
+    {
+        var id = Sam();
+        _fake.States["sub_1"] = State(id);
+        var refund = Encoding.UTF8.GetBytes("""{"id":"evt_9","subscription":"sub_1","end":true}""");
+
+        _fake.Down = true;
+        Assert.Equal(WebhookOutcome.TryAgain, await _billing.HandleWebhookAsync("fake", Signed, refund, default));
+        _fake.Down = false;
+        Assert.Equal(WebhookOutcome.Handled, await _billing.HandleWebhookAsync("fake", Signed, refund, default));
+        Assert.Equal(SubscriptionStatus.Ended, _store.Of("sam@example.com").Single().Status);
+    }
+
+    [Fact]
+    public async Task An_ordinary_event_never_ends_anything()
+    {
+        var id = Sam();
+        _fake.States["sub_1"] = State(id);
+        await _billing.HandleWebhookAsync("fake", Signed, Event("evt_1"), default);
+        Assert.Empty(_fake.Cancelled);
+    }
+
+    [Fact]
     public async Task Cancelling_at_the_end_of_the_period_is_a_status_here_and_an_ended_one_gives_nothing()
     {
         var id = Sam();

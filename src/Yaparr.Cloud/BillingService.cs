@@ -114,7 +114,16 @@ public sealed class BillingService
             return WebhookOutcome.Ignored;
         }
         SubscriptionState? state;
-        try { state = await provider.GetSubscriptionAsync(id, cancel); }
+        try
+        {
+            // Money given back ends the subscription; the provider leaves it running, so it is ended there first (ending one that is over is not an error).
+            if (received.EndIt)
+            {
+                await provider.CancelAsync(id, immediately: true, cancel);
+                _log.LogInformation("billing: ended a refunded subscription ({Provider})", provider.Name);
+            }
+            state = await provider.GetSubscriptionAsync(id, cancel);
+        }
         catch (Exception ex) when (Unreachable(ex, cancel))
         {
             // So that the provider's next try is handled and not taken for a repeat.

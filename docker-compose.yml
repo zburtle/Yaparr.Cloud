@@ -43,6 +43,14 @@ services:
       Service__Billing__Polar__WebhookSecret: "${POLAR_WEBHOOK_SECRET:-}"
       Service__Billing__Polar__CloudMonthlyProduct: "${POLAR_CLOUD_MONTHLY_PRODUCT:-}"
       Service__Billing__Polar__CloudYearlyProduct: "${POLAR_CLOUD_YEARLY_PRODUCT:-}"
+      # Email, for proving an address and for a forgotten password (README, "Email"): off while MAIL_HOST is empty. The password lives in .env on the host, never in this file.
+      Service__Mail__Host: "${MAIL_HOST:-}"
+      Service__Mail__Port: "${MAIL_PORT:-587}"
+      Service__Mail__Security: "${MAIL_SECURITY:-starttls}"
+      Service__Mail__User: "${MAIL_USER:-}"
+      Service__Mail__Password: "${MAIL_PASSWORD:-}"
+      Service__Mail__From: "${MAIL_FROM:-}"
+      Service__Mail__FromName: "${MAIL_FROM_NAME:-Yaparr Cloud}"
       # Service__KeepVersions: "3"      # the newest versions always kept ...
       # Service__KeepDays: "7"          # ... and the newest of each of this many days
       # Service__WritesPerHour: "12"

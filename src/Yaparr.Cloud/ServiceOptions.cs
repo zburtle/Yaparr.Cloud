@@ -207,4 +207,7 @@ public sealed class ServiceOptions
     /// <summary>Paid plans (<c>Service__Billing__…</c>). Off unless a provider is named; see <see cref="BillingOptions"/>.</summary>
     public BillingOptions Billing { get; set; } = new();
 
+    /// <summary>Email (<c>Service__Mail__…</c>), for proving an address and for a forgotten password. Off unless a host is named; see <see cref="MailOptions"/>.</summary>
+    public MailOptions Mail { get; set; } = new();
+
 }

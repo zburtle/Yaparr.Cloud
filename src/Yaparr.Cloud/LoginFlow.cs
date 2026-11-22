@@ -152,7 +152,7 @@ public static class Pages
         </html>
         """;
 
-    public static string Login(LoginRequest request, string username, string? problem) => Page("Sign in to Yaparr Cloud", $"""
+    public static string Login(LoginRequest request, string username, string? problem, bool forgot = false) => Page("Sign in to Yaparr Cloud", $"""
         <h1>Sign in</h1>
         <p class="muted">Yaparr on <strong>{E(request.Device)}</strong> is asking to keep your account in sync on this server. What it keeps is locked on your own device, so the server cannot read it.</p>
         {(problem == null ? "" : $"<p class=\"problem\" role=\"alert\">{E(problem)}</p>")}
@@ -167,7 +167,7 @@ public static class Pages
         <input id="password" name="password" type="password" autocomplete="current-password" required{(username.Length == 0 ? "" : " autofocus")}>
         <button type="submit">Sign in</button>
         </form>
-        <p class="muted"><a href="/account/password">Change your password</a> &middot; <a href="/account/delete">Delete your account</a></p>
+        <p class="muted">{(forgot ? "<a href=\"/account/forgot\">Forgot your password?</a> &middot; " : "")}<a href="/account/password">Change your password</a> &middot; <a href="/account/delete">Delete your account</a></p>
         """);
 
     public static string ChangePassword(string username, string? problem) => Page("Change your password", $"""

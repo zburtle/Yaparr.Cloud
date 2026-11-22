@@ -14,7 +14,9 @@ internal static class BillingApi
 
     private static BillingInterval IntervalOf(string? text) => string.Equals(text, "yearly", StringComparison.OrdinalIgnoreCase) ? BillingInterval.Yearly : BillingInterval.Monthly;
 
-    private static IResult Wrong(HttpContext http, string username) => Html(http, BillingPages.SubscriptionLogin(username, "The username or password is wrong."), StatusCodes.Status401Unauthorized);
+    private static bool MailOn(HttpContext http) => http.RequestServices.GetRequiredService<MailService>().Enabled;
+
+    private static IResult Wrong(HttpContext http, string username) => Html(http, BillingPages.SubscriptionLogin(username, "The username or password is wrong.", MailOn(http)), StatusCodes.Status401Unauthorized);
 
     public static void MapBilling(this WebApplication app, ServiceOptions options)
     {
@@ -64,19 +66,29 @@ internal static class BillingApi
             {
                 StartOutcome.Redirect => Results.Redirect(result.Url!.AbsoluteUri),
                 StartOutcome.HasAccount => Html(http, BillingPages.HasAccount(email), StatusCodes.Status409Conflict),
-                StartOutcome.PaidNotFinished => Html(http, BillingPages.PaidNotFinished(email), StatusCodes.Status409Conflict),
+                StartOutcome.PaidNotFinished => Html(http, BillingPages.PaidNotFinished(email, http.RequestServices.GetRequiredService<MailService>().Enabled), StatusCodes.Status409Conflict),
                 _ => Html(http, Pages.Message("The payment page could not be opened", "Try again in a minute."), StatusCodes.Status502BadGateway),
             };
         }).DisableAntiforgery();
 
         // Where the provider sends the person back. The token in the address is the one made when they started: it stands for the account that was made for them, and the page goes on only
         // once the payment has been stored, so a link on its own gives nothing before then.
-        billing.MapGet("/done", async (HttpContext http, string? t, int? n, IAccounts accounts, PlanGate gate, BillingService service, CancellationToken cancel) =>
+        billing.MapGet("/done", async (HttpContext http, string? t, int? n, IAccounts accounts, PlanGate gate, BillingService service, MailService mail, CancellationToken cancel) =>
         {
             if (accounts.SetupFor(t) is not { } email)
-                return Html(http, Pages.Message("This link has run out", "Go back to the sign-up page and start again."), StatusCodes.Status400BadRequest);
+                return Html(http, Pages.Message("This link has run out", mail.Enabled
+                    ? "If you paid and have not chosen a password yet, ask for a new link at /account/forgot: it is sent to your email address."
+                    : "Go back to the sign-up page and start again."), StatusCodes.Status400BadRequest);
             if (gate.StateOf(email) != PlanState.Subscribed) await service.RefreshAccountAsync(email, cancel);   // the webhook may be a moment behind
-            if (gate.StateOf(email) == PlanState.Subscribed) return Html(http, Pages.SetPassword(t!, email, null, lifetime: false));
+            if (gate.StateOf(email) == PlanState.Subscribed)
+            {
+                if (!mail.Enabled) return Html(http, Pages.SetPassword(t!, email, null, lifetime: false));
+                // With email on, the page that chooses the password is reached from the mail, so the address is proved to be theirs; this link has done its part (it proved the payment) and is replaced.
+                if (accounts.StartPending(email, TimeSpan.FromHours(Math.Max(1, options.Billing.PendingHours))) is not { } fresh)
+                    return Html(http, Pages.Message("This link has run out", "Ask for a new link at /account/forgot."), StatusCodes.Status400BadRequest);
+                mail.Send(MailService.SetupLink(email, $"{MailApi.Server(http, options)}/account/setup?t={Uri.EscapeDataString(fresh)}", TimeSpan.FromHours(Math.Max(1, options.Billing.PendingHours))));
+                return Html(http, Pages.Message("Check your email", "Your payment has arrived. A link to choose your password has been sent to your email address. It can take a minute, and it may be in the spam folder."));
+            }
             var tries = Math.Clamp(n ?? 0, 0, 1000);
             return Html(http, BillingPages.Waiting(t!, tries, giveUp: tries >= 15));
         });
@@ -84,7 +96,7 @@ internal static class BillingApi
         // The account page: the password is asked once, and then a ticket stands for it for ten minutes.
         var account = app.MapGroup("/account/subscription").AddEndpointFilter(OnlyWhenOn);
 
-        account.MapGet("", (HttpContext http) => Html(http, BillingPages.SubscriptionLogin("", null)));
+        account.MapGet("", (HttpContext http) => Html(http, BillingPages.SubscriptionLogin("", null, MailOn(http))));
 
         account.MapPost("", async (HttpContext http, IAccounts accounts, LoginLimiter limiter, PlanGate gate, ISubscriptions subscriptions, BillingTickets tickets) =>
         {
@@ -92,7 +104,7 @@ internal static class BillingApi
             var typed = form["username"].ToString();
             var password = form["password"].ToString();
             if (password.Length > 1000 || AccountDirectory.Normalize(typed) is not { } name) return Wrong(http, typed);
-            if (limiter.IsBlocked(name)) return Html(http, BillingPages.SubscriptionLogin(typed, "Too many wrong tries. Wait a quarter of an hour and try again."), StatusCodes.Status429TooManyRequests);
+            if (limiter.IsBlocked(name)) return Html(http, BillingPages.SubscriptionLogin(typed, "Too many wrong tries. Wait a quarter of an hour and try again.", MailOn(http)), StatusCodes.Status429TooManyRequests);
             if (!await Task.Run(() => accounts.CheckPassword(name, password)))
             {
                 limiter.Failed(name);

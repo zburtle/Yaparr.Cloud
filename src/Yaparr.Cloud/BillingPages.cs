@@ -26,13 +26,15 @@ public static class BillingPages
         """);
 
     /// <summary>The address has paid and has not chosen a password: nothing new is started, and the link it was given after paying is the way on.</summary>
-    public static string PaidNotFinished(string email) => Pages.Page("This address has already paid", $"""
+    public static string PaidNotFinished(string email, bool mail = false) => Pages.Page("This address has already paid", $"""
         <h1>This address has already paid</h1>
         <p>A payment for <strong>{E(email)}</strong> has already been received, so nothing new was started and you have not been charged again.</p>
-        <p>To finish, open the page you were sent back to after paying and choose a password there. If you no longer have that page, ask whoever runs this service to give you a new link.</p>
+        {(mail
+        ? $"""<p>To finish, open the link emailed to you, or ask for another: it is sent to that address.</p><form method="post" action="/account/forgot"><input type="hidden" name="email" value="{E(email)}"><button type="submit">Email me a link</button></form>"""
+        : "<p>To finish, open the page you were sent back to after paying and choose a password there. If you no longer have that page, ask whoever runs this service to give you a new link.</p>")}
         """);
 
-    public static string SubscriptionLogin(string username, string? problem) => Pages.Page("Your Yaparr Cloud subscription", $"""
+    public static string SubscriptionLogin(string username, string? problem, bool forgot = false) => Pages.Page("Your Yaparr Cloud subscription", $"""
         <h1>Your subscription</h1>
         <p class="muted">Sign in to see where your Yaparr Cloud account stands, to subscribe or renew, and to manage what you pay.</p>
         {(problem == null ? "" : $"<p class=\"problem\" role=\"alert\">{E(problem)}</p>")}
@@ -43,6 +45,7 @@ public static class BillingPages
         <input id="password" name="password" type="password" autocomplete="current-password" required{(username.Length == 0 ? "" : " autofocus")}>
         <button type="submit">Continue</button>
         </form>
+        {(forgot ? "<p class=\"muted\"><a href=\"/account/forgot\">Forgot your password?</a></p>" : "")}
         <hr>
         <h2>No account yet?</h2>
         <p class="muted">Subscribe to make one. You pay first, then choose your password. The price is shown on the payment page.</p>

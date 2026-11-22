@@ -25,6 +25,13 @@ public static class BillingPages
         <p><a class="button" href="/account/subscription">Sign in to your subscription</a></p>
         """);
 
+    /// <summary>The address has paid and has not chosen a password: nothing new is started, and the link it was given after paying is the way on.</summary>
+    public static string PaidNotFinished(string email) => Pages.Page("This address has already paid", $"""
+        <h1>This address has already paid</h1>
+        <p>A payment for <strong>{E(email)}</strong> has already been received, so nothing new was started and you have not been charged again.</p>
+        <p>To finish, open the page you were sent back to after paying and choose a password there. If you no longer have that page, ask whoever runs this service to give you a new link.</p>
+        """);
+
     public static string SubscriptionLogin(string username, string? problem) => Pages.Page("Your Yaparr Cloud subscription", $"""
         <h1>Your subscription</h1>
         <p class="muted">Sign in to see where your Yaparr Cloud account stands, to subscribe or renew, and to manage what you pay.</p>

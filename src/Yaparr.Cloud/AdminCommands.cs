@@ -15,6 +15,7 @@ public static class AdminCommands
         "  accounts remove <email> [--keep-backup]                remove an account and, unless told not to, its backup\n" +
         "  accounts list                                          who has an account, their devices, and the space each uses\n" +
         "  accounts admin <email> [--remove]                      let an account sign in to the admin portal (/admin): shows the secret for its authenticator app once; --remove takes it away\n" +
+        "  accounts setup-link <email>                            a new link to choose a password, for someone who paid and lost the page they were sent back to (the old link stops working)\n" +
         "  accounts pass <email> lifetime|none                    give an account the lifetime pass (it is never asked to pay), or take it away (it then follows its subscriptions; only matters once billing is on)\n";
 
     public const string CodesUsage =
@@ -249,6 +250,25 @@ public static class AdminCommands
                     output.WriteLine($"It was paying for {paying.Count} subscription{(paying.Count == 1 ? "" : "s")} at {string.Join(", ", paying.Select(s => s.Provider).Distinct())}: cancel {(paying.Count == 1 ? "it" : "them")} there ({string.Join(", ", paying.Select(s => s.ProviderSubscriptionId))}) so that it is not charged again. Deleting from the account page or the admin portal does this itself.");
                 if (keep) output.WriteLine("Its backup was kept. Making an account with the same name again reaches it.");
                 else output.WriteLine(erased.HadBackup ? "Its backup was deleted." : "It had no backup.");
+                return 0;
+            }
+            case "setup-link":
+            {
+                var name = rest.Count == 1 ? AccountDirectory.Normalize(rest[0]) : null;
+                if (name == null) { output.Write(Usage); return 2; }
+                if (!accounts.Exists(name)) { output.WriteLine("There is no such account."); return 1; }
+                if (!Stores.Subscriptions(options).Of(name).Any())
+                {
+                    output.WriteLine("It has paid for nothing, so there is nothing to finish: it starts again from the subscribe page.");
+                    return 1;
+                }
+                if (accounts.StartPending(name, TimeSpan.FromHours(Math.Max(1, options.Billing.PendingHours))) is not { } token)
+                {
+                    output.WriteLine("It already has a password (or a pass of its own), so it signs in. To change the password: accounts password <email>.");
+                    return 1;
+                }
+                output.WriteLine($"{options.PublicUrl.Trim().TrimEnd('/')}/billing/done?t={Uri.EscapeDataString(token)}");
+                output.WriteLine($"Give that link to {name} and nobody else: it lets whoever opens it choose the password. It works once and for {Math.Max(1, options.Billing.PendingHours)} hours, and the link they had stops working.");
                 return 0;
             }
             case "pass":

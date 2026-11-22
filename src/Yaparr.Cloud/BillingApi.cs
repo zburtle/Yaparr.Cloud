@@ -64,6 +64,7 @@ internal static class BillingApi
             {
                 StartOutcome.Redirect => Results.Redirect(result.Url!.AbsoluteUri),
                 StartOutcome.HasAccount => Html(http, BillingPages.HasAccount(email), StatusCodes.Status409Conflict),
+                StartOutcome.PaidNotFinished => Html(http, BillingPages.PaidNotFinished(email), StatusCodes.Status409Conflict),
                 _ => Html(http, Pages.Message("The payment page could not be opened", "Try again in a minute."), StatusCodes.Status502BadGateway),
             };
         }).DisableAntiforgery();

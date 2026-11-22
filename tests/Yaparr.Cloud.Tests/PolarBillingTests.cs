@@ -182,6 +182,25 @@ public class PolarBillingTests
         Assert.Equal(new BillingEvent("evt_2", null, "acct-ref"), polar.VerifyWebhook(Signed(body, "evt_2"), Bytes(body)));
     }
 
+    [Theory]
+    [InlineData("succeeded", "customer_request", true)]
+    [InlineData("succeeded", "other", true)]
+    [InlineData("succeeded", "fraudulent", true)]
+    [InlineData("pending", "customer_request", false)]
+    [InlineData("failed", "customer_request", false)]
+    [InlineData("canceled", "customer_request", false)]
+    [InlineData("succeeded", "tax_refund", false)]
+    [InlineData("succeeded", "vat_reverse_charge_correction", false)]
+    public void A_refund_that_went_through_ends_the_subscription_and_one_that_only_corrects_tax_does_not(string status, string reason, bool ends)
+    {
+        var (polar, _) = Make();
+        foreach (var kind in new[] { "refund.created", "refund.updated" })
+        {
+            var body = $$$"""{"type":"{{{kind}}}","timestamp":"2026-11-22T12:00:00Z","data":{"id":"r1","status":"{{{status}}}","reason":"{{{reason}}}","amount":400,"order_id":"o1","subscription_id":"{{{Sub}}}","customer_id":"{{{Cust}}}"}}""";
+            Assert.Equal(new BillingEvent("evt_1", Sub, null, ends), polar.VerifyWebhook(Signed(body), Bytes(body)));
+        }
+    }
+
     [Fact]
     public void An_event_of_another_kind_is_accepted_and_names_nothing()
     {

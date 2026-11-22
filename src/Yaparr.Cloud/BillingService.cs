@@ -26,7 +26,7 @@ public enum WebhookOutcome
 }
 
 /// <summary>Where a person is sent to pay, or why not.</summary>
-public enum StartOutcome { Redirect, HasAccount, ProviderFailed }
+public enum StartOutcome { Redirect, HasAccount, ProviderFailed, PaidNotFinished }
 
 public sealed record StartResult(StartOutcome Outcome, Uri? Url = null);
 
@@ -114,7 +114,16 @@ public sealed class BillingService
             return WebhookOutcome.Ignored;
         }
         SubscriptionState? state;
-        try { state = await provider.GetSubscriptionAsync(id, cancel); }
+        try
+        {
+            // Money given back ends the subscription; the provider leaves it running, so it is ended there first (ending one that is over is not an error).
+            if (received.EndIt)
+            {
+                await provider.CancelAsync(id, immediately: true, cancel);
+                _log.LogInformation("billing: ended a refunded subscription ({Provider})", provider.Name);
+            }
+            state = await provider.GetSubscriptionAsync(id, cancel);
+        }
         catch (Exception ex) when (Unreachable(ex, cancel))
         {
             // So that the provider's next try is handled and not taken for a repeat.
@@ -197,6 +206,10 @@ public sealed class BillingService
     public async Task<StartResult> StartNewAsync(string email, BillingInterval interval, Uri successBase, Uri returnUrl, CancellationToken cancel)
     {
         if (Default is not { } provider) return new StartResult(StartOutcome.ProviderFailed);
+        // An address that has paid is never sent to pay again, and its one-use link is never replaced from outside: whoever types the address would otherwise cancel the payer's link and be
+        // charged on top. An address with a password is told to sign in; one that paid and has not chosen a password yet is told to finish with the link it was given (or ask the person who runs the service).
+        if (_subscriptions.Of(email).Count > 0)
+            return new StartResult(_accounts.HasPassword(email) ? StartOutcome.HasAccount : StartOutcome.PaidNotFinished);
         if (_accounts.StartPending(email, TimeSpan.FromHours(Math.Max(1, _options.Billing.PendingHours))) is not { } token) return new StartResult(StartOutcome.HasAccount);
         var success = new UriBuilder(successBase) { Query = "t=" + Uri.EscapeDataString(token) }.Uri;
         return await CheckoutAsync(provider, email, interval, success, returnUrl, cancel);

@@ -236,7 +236,7 @@ app.MapPost("/account/delete", async (HttpContext http, IAccounts accounts, Logi
 
 // The website's page collects an email address and the code from the link and posts them here, so the code goes to this server and not to the
 // website, and the password is chosen on this server's own page below and never passes through the website.
-app.MapPost("/signup", async (HttpContext http, IAccounts accounts, ISignupCodes codes, LoginLimiter limiter) =>
+app.MapPost("/signup", async (HttpContext http, IAccounts accounts, ISignupCodes codes, LoginLimiter limiter, ISubscriptions subscriptions) =>
 {
     var form = await http.Request.ReadFormAsync();
     var who = "ip:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown");
@@ -253,6 +253,10 @@ app.MapPost("/signup", async (HttpContext http, IAccounts accounts, ISignupCodes
     }
     if (accounts.HasPassword(email))
         return Html(http, Pages.Message("You already have an account", "That email address already has an account here. Open Yaparr and sign in to Yaparr Cloud with it."), StatusCodes.Status409Conflict);
+
+    // An address that has paid for a plan and not yet chosen a password is finishing that: a code would replace its link and spend itself on an account that is already being paid for.
+    if (subscriptions.Of(email).Count > 0)
+        return Html(http, Pages.Message("This address already has an account", "A payment for that email address has already been received. Finish with the page you were sent back to after paying, or ask whoever runs this service for a new link."), StatusCodes.Status409Conflict);
 
     // Counted against the code once for a person, even if they come back to finish.
     if (codes.Use(form["code"].ToString(), email) is not { } codeId || accounts.StartSignup(email, codeId) is not { } token)

@@ -51,7 +51,8 @@ internal sealed class FakeBilling(string name = "fake") : IBillingProvider
     {
         if (!headers.TryGetValue("x-fake-signature", out var signature) || signature != "valid") throw new BadSignatureException("not signed");
         var json = JsonSerializer.Deserialize<JsonElement>(rawBody.Span);
-        return new BillingEvent(json.GetProperty("id").GetString()!, json.TryGetProperty("subscription", out var sub) ? sub.GetString() : null, null);
+        return new BillingEvent(json.GetProperty("id").GetString()!, json.TryGetProperty("subscription", out var sub) ? sub.GetString() : null, null,
+            EndIt: json.TryGetProperty("end", out var end) && end.GetBoolean());
     }
 
     public Task<SubscriptionState?> GetSubscriptionAsync(string providerSubscriptionId, CancellationToken cancel)
@@ -71,6 +72,8 @@ internal sealed class FakeBilling(string name = "fake") : IBillingProvider
     {
         Reach();
         Cancelled.Add((providerSubscriptionId, immediately));
+        // As a provider does: an ended one reports itself ended.
+        if (immediately && States.TryGetValue(providerSubscriptionId, out var held)) States[providerSubscriptionId] = held with { Status = SubscriptionStatus.Ended };
         return Task.CompletedTask;
     }
 }
@@ -494,6 +497,33 @@ public sealed class PlanGateTests : ServiceTest
         var after = new SubscriptionStore(Options);
         Assert.Empty(after.Of(Sam));
         Assert.Null(after.AccountOf(billingId));
+    }
+
+    [Fact]
+    public async Task The_admin_command_makes_a_new_link_for_someone_who_paid_and_lost_theirs_and_for_nobody_else()
+    {
+        var accounts = new AccountDirectory(Options);
+        var subscriptions = new SubscriptionStore(Options);
+        var first = accounts.StartPending(Sam, TimeSpan.FromHours(24))!;
+
+        // Nothing paid: nothing to finish.
+        Assert.Equal(1, await AdminCommands.RunAsync(["setup-link", Sam], Options, new StringWriter()));
+
+        // Paid: a link, the old one stops, and the new one is the way to the password page.
+        subscriptions.Upsert(new Subscription(Sam, "fake", "cus_1", "sub_1", "cloud", SubscriptionStatus.Active, DateTimeOffset.UtcNow.AddDays(10), DateTimeOffset.UtcNow));
+        var output = new StringWriter();
+        Assert.Equal(0, await AdminCommands.RunAsync(["setup-link", Sam], Options, output));
+        var link = output.ToString().Split('\n')[0].Trim();
+        Assert.Contains("/billing/done?t=set_", link);
+        Assert.Null(new AccountDirectory(Options).SetupFor(first));
+        Assert.Equal(Sam, new AccountDirectory(Options).SetupFor(System.Web.HttpUtility.ParseQueryString(new Uri(link.StartsWith("http") ? link : "https://x" + link).Query)["t"]));
+
+        // Someone with a password, an account that is not there, and no address: no link.
+        await AdminCommands.RunAsync(["add", "kim@example.com", "--password", Password], Options, new StringWriter());
+        subscriptions.Upsert(new Subscription("kim@example.com", "fake", "cus_2", "sub_2", "cloud", SubscriptionStatus.Active, DateTimeOffset.UtcNow.AddDays(10), DateTimeOffset.UtcNow));
+        Assert.Equal(1, await AdminCommands.RunAsync(["setup-link", "kim@example.com"], Options, new StringWriter()));
+        Assert.Equal(1, await AdminCommands.RunAsync(["setup-link", "nobody@example.com"], Options, new StringWriter()));
+        Assert.Equal(2, await AdminCommands.RunAsync(["setup-link"], Options, new StringWriter()));
     }
 
     [Fact]

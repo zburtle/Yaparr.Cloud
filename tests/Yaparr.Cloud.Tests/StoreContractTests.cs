@@ -705,6 +705,78 @@ public abstract class StoreContractTests : IDisposable
         // A new account with the same name is a new person to the provider.
         Assert.NotEqual(sam, store.BillingIdOf("sam@example.com"));
     }
+
+    // ---- accounts made by paying, and what is worth asking a provider about again (docs/billing.md) ----
+
+    [SkippableFact]
+    public void An_account_made_by_paying_starts_with_no_pass_and_no_password_and_a_token_that_works_once_and_a_new_one_replaces_it()
+    {
+        var accounts = NewAccounts();
+        var first = accounts.StartPending("sam@example.com", TimeSpan.FromHours(24));
+        Assert.NotNull(first);
+        Assert.True(accounts.Exists("sam@example.com"));
+        Assert.False(accounts.HasPassword("sam@example.com"));
+        Assert.Equal(AccountPlan.None, accounts.PassOf("sam@example.com"));
+        Assert.Equal("sam@example.com", accounts.SetupFor(first));
+
+        // Coming back before choosing a password gives a fresh token and the old one stops.
+        var second = accounts.StartPending("sam@example.com", TimeSpan.FromHours(24));
+        Assert.NotNull(second);
+        Assert.NotEqual(first, second);
+        Assert.Null(accounts.SetupFor(first));
+        Assert.Equal("sam@example.com", accounts.SetupFor(second));
+
+        Assert.Equal("sam@example.com", accounts.FinishSetup(second, Password));
+        Assert.True(accounts.CheckPassword("sam@example.com", Password));
+        Assert.Equal(AccountPlan.None, accounts.PassOf("sam@example.com"));   // choosing a password gives no pass
+
+        // With a password it is an account: paying is done from its account page, not from here.
+        Assert.Null(accounts.StartPending("sam@example.com", TimeSpan.FromHours(24)));
+    }
+
+    [SkippableFact]
+    public void Paying_never_takes_over_an_account_that_has_a_password_or_was_signed_up_with_a_code()
+    {
+        var accounts = NewAccounts();
+        accounts.Add("sam@example.com", Password);
+        Assert.Null(accounts.StartPending("sam@example.com", TimeSpan.FromHours(24)));
+        Assert.True(accounts.CheckPassword("sam@example.com", Password));
+
+        Assert.NotNull(accounts.StartSignup("kim@example.com", "code1"));   // a lifetime pass, no password yet
+        Assert.Null(accounts.StartPending("kim@example.com", TimeSpan.FromHours(24)));
+        Assert.Equal(AccountPlan.Lifetime, accounts.PassOf("kim@example.com"));
+    }
+
+    [SkippableFact]
+    public void Accounts_that_were_never_finished_are_listed_once_their_token_has_run_out_and_only_those()
+    {
+        var accounts = NewAccounts();
+        accounts.StartPending("pending@example.com", TimeSpan.FromHours(1));
+        var chosen = accounts.StartPending("chosen@example.com", TimeSpan.FromHours(1));
+        accounts.FinishSetup(chosen, Password);
+        accounts.StartSignup("coded@example.com", "code1");
+        accounts.Add("plain@example.com", Password);
+
+        var now = DateTimeOffset.UtcNow;
+        Assert.Empty(accounts.ExpiredPending(now));                                                   // the token is still good
+        Assert.Equal(new[] { "pending@example.com" }, accounts.ExpiredPending(now.AddHours(2)));       // run out: not the one with a password, not a lifetime sign-up, not an account made by hand
+    }
+
+    [SkippableFact]
+    public void Subscriptions_worth_asking_about_are_those_not_heard_of_for_a_while_or_whose_period_ended_and_never_one_that_is_over()
+    {
+        var store = NewSubscriptions();
+        Subscription At(string id, SubscriptionStatus status, int endsInDays, int updatedDaysAgo) =>
+            new("sam@example.com", "polar", "cus_1", id, "cloud", status, Epoch.AddDays(endsInDays), Epoch.AddDays(-updatedDaysAgo));
+        store.Upsert(At("fresh", SubscriptionStatus.Active, 20, 0));
+        store.Upsert(At("quiet", SubscriptionStatus.Active, 20, 5));            // not heard of for five days
+        store.Upsert(At("overdue", SubscriptionStatus.PastDue, -2, 0));         // its period ended two days ago
+        store.Upsert(At("over", SubscriptionStatus.Ended, -20, 30));            // over: nothing to ask
+
+        var stale = store.Stale(Epoch.AddDays(-3), Epoch.AddDays(-1)).Select(s => s.ProviderSubscriptionId).Order().ToList();
+        Assert.Equal(new[] { "overdue", "quiet" }, stale);
+        Assert.Equal("sam@example.com", store.Stale(Epoch.AddDays(-3), Epoch.AddDays(-1)).First().Account);
+    }
 }
 
 /// <summary>The stores that keep accounts and codes in files.</summary>

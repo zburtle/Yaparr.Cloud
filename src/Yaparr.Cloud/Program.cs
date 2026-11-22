@@ -28,6 +28,9 @@ builder.Services.AddSingleton<IAccounts>(_ => Stores.Accounts(options));
 builder.Services.AddSingleton<ISignupCodes>(_ => Stores.Codes(options));
 builder.Services.AddSingleton<ISubscriptions>(_ => Stores.Subscriptions(options));
 builder.Services.AddSingleton<PlanGate>();
+builder.Services.AddSingleton<BillingService>();
+builder.Services.AddSingleton<BillingTickets>();
+builder.Services.AddHostedService<BillingJobs>();
 builder.Services.AddSingleton<IPushRegistry>(_ => Stores.Push(options));
 builder.Services.AddSingleton<ISyncStore>(_ => Stores.Sync(options));
 builder.Services.AddSingleton<IMailboxStore>(_ => Stores.Mailbox(options));
@@ -192,7 +195,7 @@ app.MapPost("/account/password", async (HttpContext http, IAccounts accounts, Lo
 // Deleting an account, by its owner: the email address, the password and the words typed. It removes the account and everything held for it (AccountErasure).
 app.MapGet("/account/delete", (HttpContext http) => Html(http, Pages.DeleteAccount("", null)));
 
-app.MapPost("/account/delete", async (HttpContext http, IAccounts accounts, LoginLimiter limiter, IBackupStore backups, IPushRegistry push, ISyncStore sync, IMailboxStore mailbox, IBlobStore blobs, IKeepStore kept, ISubscriptions subscriptions, ILoggerFactory logs) =>
+app.MapPost("/account/delete", async (HttpContext http, IAccounts accounts, LoginLimiter limiter, IBackupStore backups, IPushRegistry push, ISyncStore sync, IMailboxStore mailbox, IBlobStore blobs, IKeepStore kept, ISubscriptions subscriptions, BillingService billing, ILoggerFactory logs) =>
 {
     var form = await http.Request.ReadFormAsync();
     var typed = form["username"].ToString();
@@ -213,6 +216,9 @@ app.MapPost("/account/delete", async (HttpContext http, IAccounts accounts, Logi
     // An admin has to be taken off the portal first, on the server, so that the last one is not deleted by mistake.
     if (accounts.IsAdmin(name))
         return Again("This account can sign in to the admin portal. Ask whoever runs this server to take that away first.", StatusCodes.Status409Conflict);
+    // Not while it is still being charged: what it pays for is ended first, and if that cannot be done nothing is deleted.
+    if (!await billing.CancelAllAsync(name, http.RequestAborted))
+        return Again("The payment provider could not be reached to end your subscription, so nothing was deleted. Try again in a minute.", StatusCodes.Status503ServiceUnavailable);
     await AccountErasure.EraseAsync(name, accounts, backups, push, sync, mailbox: mailbox, blobs: blobs, kept: kept, subscriptions: subscriptions);
     // Logged without the name: only that it happened.
     logs.CreateLogger("Yaparr.Cloud.Accounts").LogInformation("An account was deleted by its owner");
@@ -258,7 +264,7 @@ app.MapPost("/account/setup", async (HttpContext http, IAccounts accounts, SignI
     if (accounts.SetupFor(token) is not { } email)
         return Html(http, Pages.Message("This page has run out", "Go back to your sign-up link and start again."), StatusCodes.Status400BadRequest);
 
-    IResult Retry(string problem) => Html(http, Pages.SetPassword(token, email, problem), StatusCodes.Status400BadRequest);
+    IResult Retry(string problem) => Html(http, Pages.SetPassword(token, email, problem, accounts.PassOf(email) == AccountPlan.Lifetime), StatusCodes.Status400BadRequest);
     if (Passwords.Check(password) is { } weak) return Retry(weak);
     if (password.Length > 1000) return Retry("That password is too long.");
     if (password != again) return Retry("The two passwords are not the same.");
@@ -268,7 +274,7 @@ app.MapPost("/account/setup", async (HttpContext http, IAccounts accounts, SignI
     var server = options.PublicUrl.Length > 0 ? options.PublicUrl.TrimEnd('/') : $"{http.Request.Scheme}://{http.Request.Host}";
     // A button that opens the app already signed in (see SignInHandoff). Not on a phone: the Android app has no backup server yet.
     var phone = System.Text.RegularExpressions.Regex.IsMatch(http.Request.Headers.UserAgent.ToString(), "Android|iPhone|iPad|iPod|Mobile", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-    return Html(http, Pages.Welcome(done, server, phone ? null : SignInHandoff.AppLink(handoff.Create(done), server)));
+    return Html(http, Pages.Welcome(done, server, phone ? null : SignInHandoff.AppLink(handoff.Create(done), server), accounts.PassOf(done) == AccountPlan.Lifetime));
 }).DisableAntiforgery();
 
 // ---- the admin portal, for the person running the service (see AdminPortal) ----
@@ -284,6 +290,7 @@ app.MapBlobs(options);
 app.MapKeep(options);
 app.MapGateway(options);
 app.MapAccountApi(options);
+app.MapBilling(options);
 
 // ---- the backup, for an app that is signed in (Authorization: Bearer <token>) ----
 

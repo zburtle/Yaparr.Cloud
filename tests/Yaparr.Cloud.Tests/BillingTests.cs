@@ -10,23 +10,69 @@ using Yaparr.Cloud;
 namespace Yaparr.Cloud.Tests;
 
 /// <summary>
-/// A provider that turns billing on in a test and does nothing else: the first step of paid plans (docs/billing.md) is only what an account may do, and nothing in it asks a provider anything.
+/// A provider for tests: it turns billing on, keeps the subscriptions a test sets as "what the provider says", records what it was asked, and can be made unreachable. A webhook is JSON
+/// <c>{"id": "evt_1", "subscription": "sub_1"}</c> with the header <c>x-fake-signature: valid</c> (anything else is a bad signature).
 /// </summary>
 internal sealed class FakeBilling(string name = "fake") : IBillingProvider
 {
     public string Name => name;
 
-    public Task<Uri> StartCheckoutAsync(CheckoutRequest request, CancellationToken cancel) => throw new NotSupportedException();
+    /// <summary>What the provider says each subscription is now, by its id. Absent: it does not know it.</summary>
+    public Dictionary<string, SubscriptionState> States { get; } = new();
 
-    public Task<Uri> PortalAsync(string providerCustomerId, Uri returnTo, CancellationToken cancel) => throw new NotSupportedException();
+    public List<CheckoutRequest> Checkouts { get; } = new();
+    public List<(string Customer, Uri Return)> Portals { get; } = new();
+    public List<(string Subscription, bool Immediately)> Cancelled { get; } = new();
+    public List<string> Asked { get; } = new();
 
-    public BillingEvent VerifyWebhook(IReadOnlyDictionary<string, string> headers, ReadOnlyMemory<byte> rawBody) => throw new NotSupportedException();
+    /// <summary>True: every call that goes to the provider fails as a network failure does.</summary>
+    public bool Down { get; set; }
 
-    public Task<SubscriptionState?> GetSubscriptionAsync(string providerSubscriptionId, CancellationToken cancel) => throw new NotSupportedException();
+    private void Reach()
+    {
+        if (Down) throw new HttpRequestException("The provider could not be reached.");
+    }
 
-    public Task<IReadOnlyList<SubscriptionState>> FindAsync(string accountRef, CancellationToken cancel) => throw new NotSupportedException();
+    public Task<Uri> StartCheckoutAsync(CheckoutRequest request, CancellationToken cancel)
+    {
+        Reach();
+        Checkouts.Add(request);
+        return Task.FromResult(new Uri("https://pay.example/checkout/" + Checkouts.Count));
+    }
 
-    public Task CancelAsync(string providerSubscriptionId, bool immediately, CancellationToken cancel) => throw new NotSupportedException();
+    public Task<Uri> PortalAsync(string providerCustomerId, Uri returnTo, CancellationToken cancel)
+    {
+        Reach();
+        Portals.Add((providerCustomerId, returnTo));
+        return Task.FromResult(new Uri("https://pay.example/portal/" + providerCustomerId));
+    }
+
+    public BillingEvent VerifyWebhook(IReadOnlyDictionary<string, string> headers, ReadOnlyMemory<byte> rawBody)
+    {
+        if (!headers.TryGetValue("x-fake-signature", out var signature) || signature != "valid") throw new BadSignatureException("not signed");
+        var json = JsonSerializer.Deserialize<JsonElement>(rawBody.Span);
+        return new BillingEvent(json.GetProperty("id").GetString()!, json.TryGetProperty("subscription", out var sub) ? sub.GetString() : null, null);
+    }
+
+    public Task<SubscriptionState?> GetSubscriptionAsync(string providerSubscriptionId, CancellationToken cancel)
+    {
+        Reach();
+        Asked.Add(providerSubscriptionId);
+        return Task.FromResult(States.GetValueOrDefault(providerSubscriptionId));
+    }
+
+    public Task<IReadOnlyList<SubscriptionState>> FindAsync(string accountRef, CancellationToken cancel)
+    {
+        Reach();
+        return Task.FromResult<IReadOnlyList<SubscriptionState>>(States.Values.Where(s => s.AccountRef == accountRef).ToList());
+    }
+
+    public Task CancelAsync(string providerSubscriptionId, bool immediately, CancellationToken cancel)
+    {
+        Reach();
+        Cancelled.Add((providerSubscriptionId, immediately));
+        return Task.CompletedTask;
+    }
 }
 
 /// <summary>What an account is, from its pass and its subscriptions (nothing but the rules).</summary>

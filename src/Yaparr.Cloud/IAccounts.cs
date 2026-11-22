@@ -33,6 +33,16 @@ public interface IAccounts
     /// </summary>
     string? StartSignup(string name, string? signupCodeId);
 
+    /// <summary>
+    /// Begins an account made by paying (docs/billing.md): it exists with no pass and no password, and is given a one-use setup token (kept only as a hash, good for <paramref name="lifetime"/>), which goes
+    /// to the person in the address they are sent back to after paying. Someone who comes back for the same address before choosing a password is given a new token. Null if the address already has
+    /// an account with a password, or one that was signed up with a code (it has a lifetime pass and needs no payment).
+    /// </summary>
+    string? StartPending(string name, TimeSpan lifetime);
+
+    /// <summary>The accounts made by paying that have no password and whose setup token has run out: what nobody came back to finish (the caller removes those that never paid).</summary>
+    IReadOnlyList<string> ExpiredPending(DateTimeOffset now);
+
     /// <summary>The account a setup token is for, or null if it is not one, has been used, or has run out. Does not use it.</summary>
     string? SetupFor(string? token);
 

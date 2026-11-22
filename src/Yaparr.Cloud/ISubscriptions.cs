@@ -18,6 +18,9 @@ public interface ISubscriptions
     /// <summary>The id an account is known by to a provider: random, made the first time it is asked for, and the same afterwards.</summary>
     string BillingIdOf(string account);
 
+    /// <summary>The subscriptions that are not over and are worth asking the provider about again: not updated since <paramref name="updatedBefore"/>, or whose period ended before <paramref name="periodEndedBefore"/>.</summary>
+    IReadOnlyList<Subscription> Stale(DateTimeOffset updatedBefore, DateTimeOffset periodEndedBefore);
+
     /// <summary>The account a billing id belongs to, or null.</summary>
     string? AccountOf(string? billingId);
 

@@ -77,6 +77,15 @@ public sealed class SubscriptionStore : ISubscriptions
         }
     }
 
+    public IReadOnlyList<Subscription> Stale(DateTimeOffset updatedBefore, DateTimeOffset periodEndedBefore)
+    {
+        lock (_gate)
+        {
+            Refresh();
+            return _data.Subscriptions.Where(s => s.Status != SubscriptionStatus.Ended && (s.UpdatedAt < updatedBefore || s.PeriodEnd < periodEndedBefore)).ToList();
+        }
+    }
+
     public string BillingIdOf(string account)
     {
         lock (_gate)

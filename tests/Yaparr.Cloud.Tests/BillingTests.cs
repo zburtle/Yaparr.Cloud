@@ -254,6 +254,11 @@ public sealed class PlanGateTests : ServiceTest
         Paid(Sam, 20, SubscriptionStatus.Canceling);   // cancelled: paid until then, and does not renew
         plan = await (await Call(client, token, HttpMethod.Get, "/v1/plan")).Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(("subscribed", false), (plan.GetProperty("state").GetString(), plan.GetProperty("willRenew").GetBoolean()));
+        Assert.False(plan.GetProperty("pastDue").GetBoolean());
+
+        Paid(Sam, 20, SubscriptionStatus.PastDue);   // a payment failed and is being retried: still covered, and the person is told to update the card
+        plan = await (await Call(client, token, HttpMethod.Get, "/v1/plan")).Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(("subscribed", false, true), (plan.GetProperty("state").GetString(), plan.GetProperty("willRenew").GetBoolean(), plan.GetProperty("pastDue").GetBoolean()));
     }
 
     [Fact]

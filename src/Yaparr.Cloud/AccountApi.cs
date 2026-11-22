@@ -38,6 +38,7 @@ internal static class AccountApi
                 plan = plan.Plan,
                 endsAt = plan.EndsAt,
                 willRenew = plan.WillRenew,
+                pastDue = plan.PastDue,
             });
         });
 

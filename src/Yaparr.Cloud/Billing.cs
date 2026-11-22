@@ -70,7 +70,8 @@ public static class AccountPlan
 }
 
 /// <summary>What <c>GET /v1/plan</c> says.</summary>
-public sealed record PlanDescription(PlanState State, string? Plan, DateTimeOffset? EndsAt, bool WillRenew);
+/// <summary><see cref="PastDue"/>: a payment failed and is being retried, with nothing else paid for: still covered until <see cref="EndsAt"/>, and the person should update their card.</summary>
+public sealed record PlanDescription(PlanState State, string? Plan, DateTimeOffset? EndsAt, bool WillRenew, bool PastDue = false);
 
 /// <summary>
 /// Who may sign in on a device and use the cloud's services, once billing is on. One question (<see cref="StateOf"/>) and one answer for a refusal (<see cref="Refuse"/>), asked at the places
@@ -95,7 +96,11 @@ public sealed class PlanGate(ServiceOptions options, IAccounts accounts, ISubscr
         if (state is PlanState.Off or PlanState.Lifetime) return new PlanDescription(state, null, null, false);
         var subs = subscriptions.Of(account);
         if (AccountPlan.Current(subs, _now(), Grace) is { } current)
-            return new PlanDescription(state, current.Plan, current.PeriodEnd, subs.Any(s => AccountPlan.Covers(s, _now(), Grace) && s.Status == SubscriptionStatus.Active));
+        {
+            var covering = subs.Where(s => AccountPlan.Covers(s, _now(), Grace)).ToList();
+            var renews = covering.Any(s => s.Status == SubscriptionStatus.Active);
+            return new PlanDescription(state, current.Plan, current.PeriodEnd, renews, PastDue: !renews && covering.Any(s => s.Status == SubscriptionStatus.PastDue));
+        }
         // Lapsed: when the last one ran out, if it ever was one.
         var last = subs.OrderByDescending(s => s.PeriodEnd).FirstOrDefault();
         return new PlanDescription(state, last?.Plan, last?.PeriodEnd, false);

@@ -108,7 +108,7 @@ The pages are plain HTML with no scripts, are never cached or framed, and everyt
 | `POST /v1/push/wake/{token}` | no account | `202` sent; `404` no such token; `410` the push service says the device is gone (it is forgotten); `429` too often; `502` could not send |
 | `GET /v1/sync[?since=n&limit=k]` | `Bearer` | `{cursor, more, records:[{kind,id,clock,device,deleted,body,cursor}]}`: the records changed after cursor `n` (0 for all), oldest change first, at most 100; `cursor` is where to ask next |
 | `PUT /v1/sync` | `Bearer`; `{records:[{kind,id,clock,device,deleted,body}]}` (1 to 100) | `{cursor, stale:["kind/id"]}`; a record whose clock is not newer than the one held is named in `stale` and not taken; `400` for a bad record (nothing is stored), `409` past the account's record limit, `429` too often |
-| `GET /v1/plan` | `Bearer` | `{billing:"off"}` when billing is off, else `{billing:"on", state:"lifetime"\|"subscribed"\|"lapsed", plan, endsAt, willRenew}` (see *Paid plans*) |
+| `GET /v1/plan` | `Bearer` | `{billing:"off"}` when billing is off, else `{billing:"on", state:"lifetime"\|"subscribed"\|"lapsed", plan, endsAt, willRenew, pastDue}` (see *Paid plans*) |
 | `GET /healthz` | | `200` |
 
 Everything under `/v1/backup` needs `Authorization: Bearer <token>`; without a token the service gave out, the answer is `401`. `If-Match` is what keeps two devices from overwriting each other, and also makes a replayed upload a `409` instead of a second copy.

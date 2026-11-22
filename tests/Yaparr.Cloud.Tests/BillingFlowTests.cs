@@ -570,6 +570,22 @@ public sealed class BillingApiTests : ServiceTest
     }
 
     [Fact]
+    public async Task The_sign_in_page_for_the_subscription_also_lets_someone_with_no_account_subscribe()
+    {
+        var client = Run();
+        var html = await (await client.GetAsync("/account/subscription")).Content.ReadAsStringAsync();
+        Assert.Contains("action=\"/account/subscription\"", html);   // signing in
+        Assert.Contains("action=\"/billing/start\"", html);          // and paying first
+        Assert.Contains("name=\"interval\"", html);
+        Assert.Contains("No account yet?", html);
+
+        // The form on that page is the same one as the website's: it starts a payment.
+        var response = await Form(client, "/billing/start", ("email", "new@example.com"), ("interval", "yearly"));
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Equal(BillingInterval.Yearly, _fake.Checkouts.Last().Interval);
+    }
+
+    [Fact]
     public async Task An_address_that_has_paid_and_not_chosen_a_password_is_not_sent_to_pay_again_and_its_link_is_not_replaced()
     {
         var client = Run();

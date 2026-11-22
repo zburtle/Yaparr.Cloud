@@ -27,6 +27,11 @@ builder.Services.AddSingleton<IBackupStore>(_ => Stores.Backups(options));
 builder.Services.AddSingleton<IAccounts>(_ => Stores.Accounts(options));
 builder.Services.AddSingleton<ISignupCodes>(_ => Stores.Codes(options));
 builder.Services.AddSingleton<ISubscriptions>(_ => Stores.Subscriptions(options));
+// Email is off unless a server to send through is named; a half-set one is said at the start, not at the first forgotten password.
+if (options.Mail.Problem() is { } mailProblem) throw new InvalidOperationException(mailProblem);
+if (options.Mail.Host.Length > 0) builder.Services.AddSingleton<IMailer>(new SmtpMailer(options.Mail));
+builder.Services.AddSingleton(sp => new MailService(sp.GetService<IMailer>(), sp.GetRequiredService<ILoggerFactory>()));
+builder.Services.AddSingleton<ResetLinks>();
 // A provider is only made when it is the one named, and only when it is set up: a half-set Polar is said at the start, with the name of what is missing.
 if (options.Billing.Provider.Equals(PolarBilling.ProviderName, StringComparison.OrdinalIgnoreCase))
 {
@@ -111,12 +116,12 @@ app.MapGet("/healthz", () => Results.Ok(new { ok = true }));
 
 // ---- signing in, in the browser (see LoginFlow) ----
 
-app.MapGet("/login", (HttpContext http, string? redirect_uri, string? code_challenge, string? state, string? device) =>
+app.MapGet("/login", (HttpContext http, MailService mail, string? redirect_uri, string? code_challenge, string? state, string? device) =>
     LoginFlow.Read(redirect_uri, code_challenge, state, device, out var problem) is { } request
-        ? Html(http, Pages.Login(request, "", null))
+        ? Html(http, Pages.Login(request, "", null, mail.Enabled))
         : Html(http, Pages.Message("This link does not work", problem), StatusCodes.Status400BadRequest));
 
-app.MapPost("/login", async (HttpContext http, IAccounts accounts, LoginFlow flow, LoginLimiter limiter, PlanGate gate) =>
+app.MapPost("/login", async (HttpContext http, IAccounts accounts, LoginFlow flow, LoginLimiter limiter, PlanGate gate, MailService mail) =>
 {
     var form = await http.Request.ReadFormAsync();
     if (LoginFlow.Read(form["redirect_uri"], form["code_challenge"], form["state"], form["device"], out var problem) is not { } request)
@@ -127,13 +132,13 @@ app.MapPost("/login", async (HttpContext http, IAccounts accounts, LoginFlow flo
     // The same answer for a name that does not exist as for a wrong password, so the page cannot be used to find out who has an account.
     const string wrong = "The username or password is wrong.";
     if (AccountDirectory.Normalize(typed) is not { } name || password.Length > 1000)
-        return Html(http, Pages.Login(request, typed, wrong), StatusCodes.Status401Unauthorized);
+        return Html(http, Pages.Login(request, typed, wrong, mail.Enabled), StatusCodes.Status401Unauthorized);
     if (limiter.IsBlocked(name))
-        return Html(http, Pages.Login(request, typed, "Too many wrong tries. Wait a quarter of an hour and try again."), StatusCodes.Status429TooManyRequests);
+        return Html(http, Pages.Login(request, typed, "Too many wrong tries. Wait a quarter of an hour and try again.", mail.Enabled), StatusCodes.Status429TooManyRequests);
     if (!await Task.Run(() => accounts.CheckPassword(name, password)))
     {
         limiter.Failed(name);
-        return Html(http, Pages.Login(request, typed, wrong), StatusCodes.Status401Unauthorized);
+        return Html(http, Pages.Login(request, typed, wrong, mail.Enabled), StatusCodes.Status401Unauthorized);
     }
     limiter.Succeeded(name);
     // A subscription that has ended means no new device (the password was right, so it is safe to say why).
@@ -236,7 +241,7 @@ app.MapPost("/account/delete", async (HttpContext http, IAccounts accounts, Logi
 
 // The website's page collects an email address and the code from the link and posts them here, so the code goes to this server and not to the
 // website, and the password is chosen on this server's own page below and never passes through the website.
-app.MapPost("/signup", async (HttpContext http, IAccounts accounts, ISignupCodes codes, LoginLimiter limiter, ISubscriptions subscriptions) =>
+app.MapPost("/signup", async (HttpContext http, IAccounts accounts, ISignupCodes codes, LoginLimiter limiter, ISubscriptions subscriptions, MailService mail) =>
 {
     var form = await http.Request.ReadFormAsync();
     var who = "ip:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown");
@@ -263,6 +268,12 @@ app.MapPost("/signup", async (HttpContext http, IAccounts accounts, ISignupCodes
     {
         limiter.Failed(who);
         return Html(http, Pages.Message("This link does not work", badCode), StatusCodes.Status403Forbidden);
+    }
+    // With email on the link to choose the password goes to the address, so the address is proved to be theirs before anything is set on it; without, the page does it as it always did.
+    if (mail.Enabled)
+    {
+        mail.Send(MailService.SetupLink(email, $"{MailApi.Server(http, options)}/account/setup?t={Uri.EscapeDataString(token)}", AccountDirectory.SetupLifetime));
+        return Html(http, Pages.Message("Check your email", "A link to choose your password has been sent to that address. It can take a minute, and it may be in the spam folder. It works once, for half an hour."));
     }
     return Html(http, Pages.SetPassword(token, email, null));
 }).DisableAntiforgery();
@@ -302,6 +313,7 @@ app.MapKeep(options);
 app.MapGateway(options);
 app.MapAccountApi(options);
 app.MapBilling(options);
+app.MapMail(options);
 
 // ---- the backup, for an app that is signed in (Authorization: Bearer <token>) ----
 

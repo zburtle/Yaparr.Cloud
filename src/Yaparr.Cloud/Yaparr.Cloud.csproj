@@ -14,6 +14,9 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Yaparr.Cloud.Tests" />
+    <!-- The payment plug-in (kept apart from this repository) uses the server's pages and helpers; see Plugins.cs. -->
+    <InternalsVisibleTo Include="Yaparr.Billing" />
+    <InternalsVisibleTo Include="Yaparr.Billing.Tests" />
   </ItemGroup>
 
 </Project>

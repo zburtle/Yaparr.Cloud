@@ -1,8 +1,10 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Yaparr.Billing/Yaparr.Billing.csproj" />
     <Project Path="src/Yaparr.Cloud/Yaparr.Cloud.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Yaparr.Billing.Tests/Yaparr.Billing.Tests.csproj" />
     <Project Path="tests/Yaparr.Cloud.Tests/Yaparr.Cloud.Tests.csproj" />
   </Folder>
 </Solution>

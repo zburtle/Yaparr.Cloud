@@ -1,0 +1,10 @@
+# The payment plug-in's settings for the compose file in the server's repository. Add it with COMPOSE_FILE=docker-compose.yml:<path to this file> in .env, and put
+# Yaparr.Billing.dll in the folder that PLUGINS_DIR names. The secrets are in .env on the host, never in a file that is committed.
+services:
+  cloud:
+    environment:
+      Service__Billing__Polar__Server: "${POLAR_SERVER:-production}"
+      Service__Billing__Polar__AccessToken: "${POLAR_ACCESS_TOKEN:-}"
+      Service__Billing__Polar__WebhookSecret: "${POLAR_WEBHOOK_SECRET:-}"
+      Service__Billing__Polar__CloudMonthlyProduct: "${POLAR_CLOUD_MONTHLY_PRODUCT:-}"
+      Service__Billing__Polar__CloudYearlyProduct: "${POLAR_CLOUD_YEARLY_PRODUCT:-}"

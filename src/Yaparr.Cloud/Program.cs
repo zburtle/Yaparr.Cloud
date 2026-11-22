@@ -32,17 +32,12 @@ if (options.Mail.Problem() is { } mailProblem) throw new InvalidOperationExcepti
 if (options.Mail.Host.Length > 0) builder.Services.AddSingleton<IMailer>(new SmtpMailer(options.Mail));
 builder.Services.AddSingleton(sp => new MailService(sp.GetService<IMailer>(), sp.GetRequiredService<ILoggerFactory>()));
 builder.Services.AddSingleton<ResetLinks>();
-// A provider is only made when it is the one named, and only when it is set up: a half-set Polar is said at the start, with the name of what is missing.
-if (options.Billing.Provider.Equals(PolarBilling.ProviderName, StringComparison.OrdinalIgnoreCase))
-{
-    if (PolarBilling.Missing(options.Billing.Polar) is { } missing)
-        throw new InvalidOperationException($"Service__Billing__Provider is \"polar\", but {missing} is not set.");
-    builder.Services.AddSingleton<IBillingProvider>(_ => new PolarBilling(options.Billing.Polar, PolarBilling.CreateClient(options.Billing.Polar)));
-}
+// Plug-ins (see Plugins.cs): none unless a folder is named, and then the service is only what is in this repository. Payment is one of them; everything here that a payment decides (who is covered, the 402,
+// GET /v1/plan) works with none.
+var plugins = PluginRegistry.Load(options.PluginsDirectory, options.Plugins);
+builder.Services.AddSingleton(plugins);
+foreach (var plugin in plugins.Plugins) plugin.ConfigureServices(builder.Services, options, builder.Configuration);
 builder.Services.AddSingleton<PlanGate>();
-builder.Services.AddSingleton<BillingService>();
-builder.Services.AddSingleton<BillingTickets>();
-builder.Services.AddHostedService<BillingJobs>();
 builder.Services.AddSingleton<IPushRegistry>(_ => Stores.Push(options));
 builder.Services.AddSingleton<ISyncStore>(_ => Stores.Sync(options));
 builder.Services.AddSingleton<IMailboxStore>(_ => Stores.Mailbox(options));
@@ -85,12 +80,12 @@ builder.Services.AddRateLimiter(r =>
 
 var app = builder.Build();
 
-// Billing is off unless a provider is named; a name this build has no provider for is a mistake to say at once, not at the first payment.
+// Billing is off unless a provider is named; a name that nothing answers to (no plug-in, or one that has no such provider) is a mistake to say at once, not at the first payment.
 if (options.Billing.Provider.Length > 0)
 {
-    var known = app.Services.GetServices<IBillingProvider>().Select(p => p.Name).ToList();
+    var known = app.Services.GetServices<IBillingBackend>().SelectMany(p => p.Names).ToList();
     if (!known.Contains(options.Billing.Provider, StringComparer.OrdinalIgnoreCase))
-        throw new InvalidOperationException($"Service__Billing__Provider is \"{options.Billing.Provider}\", but this build has no such billing provider (it has: {(known.Count == 0 ? "none" : string.Join(", ", known))}). Name one, or leave it empty to run without billing.");
+        throw new InvalidOperationException($"Service__Billing__Provider is \"{options.Billing.Provider}\", but nothing here answers to that name ({(known.Count == 0 ? "no plug-in provides billing: see Service__PluginsDirectory" : "it has: " + string.Join(", ", known))}). Name one, or leave it empty to run without billing.");
 }
 
 // Items left in mailboxes go after MailboxKeepDays; each post clears its own mailbox, and this clears the ones nobody posts to any more.
@@ -207,7 +202,7 @@ app.MapPost("/account/password", async (HttpContext http, IAccounts accounts, Lo
 // Deleting an account, by its owner: the email address, the password and the words typed. It removes the account and everything held for it (AccountErasure).
 app.MapGet("/account/delete", (HttpContext http) => Html(http, Pages.DeleteAccount("", null)));
 
-app.MapPost("/account/delete", async (HttpContext http, IAccounts accounts, LoginLimiter limiter, IBackupStore backups, IPushRegistry push, ISyncStore sync, IMailboxStore mailbox, IBlobStore blobs, IKeepStore kept, ISubscriptions subscriptions, BillingService billing, ILoggerFactory logs) =>
+app.MapPost("/account/delete", async (HttpContext http, IAccounts accounts, LoginLimiter limiter, IBackupStore backups, IPushRegistry push, ISyncStore sync, IMailboxStore mailbox, IBlobStore blobs, IKeepStore kept, ISubscriptions subscriptions, IEnumerable<IAccountDeletionGuard> guards, ILoggerFactory logs) =>
 {
     var form = await http.Request.ReadFormAsync();
     var typed = form["username"].ToString();
@@ -228,9 +223,9 @@ app.MapPost("/account/delete", async (HttpContext http, IAccounts accounts, Logi
     // An admin has to be taken off the portal first, on the server, so that the last one is not deleted by mistake.
     if (accounts.IsAdmin(name))
         return Again("This account can sign in to the admin portal. Ask whoever runs this server to take that away first.", StatusCodes.Status409Conflict);
-    // Not while it is still being charged: what it pays for is ended first, and if that cannot be done nothing is deleted.
-    if (!await billing.CancelAllAsync(name, http.RequestAborted))
-        return Again("The payment provider could not be reached to end your subscription, so nothing was deleted. Try again in a minute.", StatusCodes.Status503ServiceUnavailable);
+    // Not while something a plug-in looks after says no (a subscription that is still being charged: it is ended first, and if that cannot be done nothing is deleted).
+    if (await AccountDeletionGuards.RefusalAsync(guards, name, http.RequestAborted) is { } refusal)
+        return Again(refusal, StatusCodes.Status503ServiceUnavailable);
     await AccountErasure.EraseAsync(name, accounts, backups, push, sync, mailbox: mailbox, blobs: blobs, kept: kept, subscriptions: subscriptions);
     // Logged without the name: only that it happened.
     logs.CreateLogger("Yaparr.Cloud.Accounts").LogInformation("An account was deleted by its owner");
@@ -312,8 +307,8 @@ app.MapBlobs(options);
 app.MapKeep(options);
 app.MapGateway(options);
 app.MapAccountApi(options);
-app.MapBilling(options);
 app.MapMail(options);
+foreach (var plugin in plugins.Plugins) plugin.MapEndpoints(app, options);
 
 // ---- the backup, for an app that is signed in (Authorization: Bearer <token>) ----
 

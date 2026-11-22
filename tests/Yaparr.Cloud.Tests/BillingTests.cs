@@ -10,72 +10,12 @@ using Yaparr.Cloud;
 namespace Yaparr.Cloud.Tests;
 
 /// <summary>
-/// A provider for tests: it turns billing on, keeps the subscriptions a test sets as "what the provider says", records what it was asked, and can be made unreachable. A webhook is JSON
-/// <c>{"id": "evt_1", "subscription": "sub_1"}</c> with the header <c>x-fake-signature: valid</c> (anything else is a bad signature).
+/// What turns billing on in a test of the server on its own: it answers to the name "fake", as a plug-in that takes payments would answer to its provider's. The server's rules (who is covered, the 402,
+/// GET /v1/plan) need nothing more; the payment flows are tested with the plug-in.
 /// </summary>
-internal sealed class FakeBilling(string name = "fake") : IBillingProvider
+internal sealed class TestBilling : IBillingBackend
 {
-    public string Name => name;
-
-    /// <summary>What the provider says each subscription is now, by its id. Absent: it does not know it.</summary>
-    public Dictionary<string, SubscriptionState> States { get; } = new();
-
-    public List<CheckoutRequest> Checkouts { get; } = new();
-    public List<(string Customer, Uri Return)> Portals { get; } = new();
-    public List<(string Subscription, bool Immediately)> Cancelled { get; } = new();
-    public List<string> Asked { get; } = new();
-
-    /// <summary>True: every call that goes to the provider fails as a network failure does.</summary>
-    public bool Down { get; set; }
-
-    private void Reach()
-    {
-        if (Down) throw new HttpRequestException("The provider could not be reached.");
-    }
-
-    public Task<Uri> StartCheckoutAsync(CheckoutRequest request, CancellationToken cancel)
-    {
-        Reach();
-        Checkouts.Add(request);
-        return Task.FromResult(new Uri("https://pay.example/checkout/" + Checkouts.Count));
-    }
-
-    public Task<Uri> PortalAsync(string providerCustomerId, Uri returnTo, CancellationToken cancel)
-    {
-        Reach();
-        Portals.Add((providerCustomerId, returnTo));
-        return Task.FromResult(new Uri("https://pay.example/portal/" + providerCustomerId));
-    }
-
-    public BillingEvent VerifyWebhook(IReadOnlyDictionary<string, string> headers, ReadOnlyMemory<byte> rawBody)
-    {
-        if (!headers.TryGetValue("x-fake-signature", out var signature) || signature != "valid") throw new BadSignatureException("not signed");
-        var json = JsonSerializer.Deserialize<JsonElement>(rawBody.Span);
-        return new BillingEvent(json.GetProperty("id").GetString()!, json.TryGetProperty("subscription", out var sub) ? sub.GetString() : null, null,
-            EndIt: json.TryGetProperty("end", out var end) && end.GetBoolean());
-    }
-
-    public Task<SubscriptionState?> GetSubscriptionAsync(string providerSubscriptionId, CancellationToken cancel)
-    {
-        Reach();
-        Asked.Add(providerSubscriptionId);
-        return Task.FromResult(States.GetValueOrDefault(providerSubscriptionId));
-    }
-
-    public Task<IReadOnlyList<SubscriptionState>> FindAsync(string accountRef, CancellationToken cancel)
-    {
-        Reach();
-        return Task.FromResult<IReadOnlyList<SubscriptionState>>(States.Values.Where(s => s.AccountRef == accountRef).ToList());
-    }
-
-    public Task CancelAsync(string providerSubscriptionId, bool immediately, CancellationToken cancel)
-    {
-        Reach();
-        Cancelled.Add((providerSubscriptionId, immediately));
-        // As a provider does: an ended one reports itself ended.
-        if (immediately && States.TryGetValue(providerSubscriptionId, out var held)) States[providerSubscriptionId] = held with { Status = SubscriptionStatus.Ended };
-        return Task.CompletedTask;
-    }
+    public IReadOnlyList<string> Names { get; } = new[] { "fake" };
 }
 
 /// <summary>What an account is, from its pass and its subscriptions (nothing but the rules).</summary>
@@ -166,7 +106,7 @@ public sealed class PlanGateTests : ServiceTest
         foreach (var (key, value) in settings ?? new()) all[key] = value;
         return Start(all, services =>
         {
-            services.AddSingleton<IBillingProvider>(new FakeBilling());
+            services.AddSingleton<IBillingBackend>(new TestBilling());
             more?.Invoke(services);
         });
     }
@@ -461,30 +401,32 @@ public sealed class PlanGateTests : ServiceTest
     [Fact]
     public void A_provider_name_this_build_has_no_provider_for_stops_the_service_at_once_and_names_the_ones_it_has()
     {
-        var failure = Record.Exception(() => Start(new() { ["Billing:Provider"] = "stripe" }, services => services.AddSingleton<IBillingProvider>(new FakeBilling())).GetAsync("/healthz").GetAwaiter().GetResult());
+        var failure = Record.Exception(() => Start(new() { ["Billing:Provider"] = "stripe" }, services => services.AddSingleton<IBillingBackend>(new TestBilling())).GetAsync("/healthz").GetAwaiter().GetResult());
         Assert.NotNull(failure);
         var all = new List<string>();
         for (var e = failure; e != null; e = e.InnerException) all.Add(e.Message);
         var message = string.Join(" | ", all);
         Assert.Contains("\"stripe\"", message);
-        Assert.Contains("no such billing provider", message);
+        Assert.Contains("nothing here answers to that name", message);
         Assert.Contains("fake", message);
     }
 
     [Fact]
-    public void Polar_named_without_its_settings_stops_the_service_and_says_what_is_missing()
+    public void A_provider_named_with_no_plug_in_that_takes_payments_stops_the_service_and_says_to_load_one()
     {
-        var failure = Record.Exception(() => Start(new() { ["Billing:Provider"] = "polar", ["Billing:Polar:AccessToken"] = "x" }).GetAsync("/healthz").GetAwaiter().GetResult());
+        var failure = Record.Exception(() => Start(new() { ["Billing:Provider"] = "polar" }).GetAsync("/healthz").GetAwaiter().GetResult());
         Assert.NotNull(failure);
         var all = new List<string>();
         for (var e = failure; e != null; e = e.InnerException) all.Add(e.Message);
-        Assert.Contains("Service__Billing__Polar__WebhookSecret", string.Join(" | ", all));
+        var message = string.Join(" | ", all);
+        Assert.Contains("\"polar\"", message);
+        Assert.Contains("Service__PluginsDirectory", message);
     }
 
     [Fact]
     public async Task A_provider_is_found_whatever_the_case_of_its_name_in_the_settings()
     {
-        var client = Start(new() { ["Billing:Provider"] = "FAKE" }, services => services.AddSingleton<IBillingProvider>(new FakeBilling()));
+        var client = Start(new() { ["Billing:Provider"] = "FAKE" }, services => services.AddSingleton<IBillingBackend>(new TestBilling()));
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/healthz")).StatusCode);
     }
 

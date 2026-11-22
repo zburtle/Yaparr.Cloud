@@ -374,7 +374,7 @@ public sealed class BillingServiceTests : IDisposable
 }
 
 /// <summary>The addresses of billing, end to end: the webhook, paying first, coming back, the account page, and deleting an account that pays.</summary>
-public sealed class BillingApiTests : ServiceTest
+public sealed class BillingApiTests : BillingTestBase
 {
     private const string Sam = "sam@example.com";
     private readonly FakeBilling _fake = new();

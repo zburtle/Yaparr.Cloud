@@ -10,13 +10,8 @@ namespace Yaparr.Cloud;
 internal static class AdminPages
 {
     /// <param name="Known">What is stored for the account could be read (it could not when the store of backups was down).</param>
-    public sealed record AccountRow(AccountEntry Account, int Versions, long Bytes, DateTimeOffset? Last, bool Known = true, AccountUse? Use = null, PlanInfo? Plan = null);
+    public sealed record AccountRow(AccountEntry Account, int Versions, long Bytes, DateTimeOffset? Last, bool Known = true, AccountUse? Use = null);
 
-    /// <summary>Where an account stands on payments (only when billing is on). <see cref="Paid"/>: it has had a subscription at some point. <see cref="Running"/>: one is not over.</summary>
-    public sealed record PlanInfo(PlanState State, bool PastDue, bool Canceling, DateTimeOffset? EndsAt, bool Paid, bool Running);
-
-    /// <summary>The counts of the Payments card: how many accounts are in each state.</summary>
-    public sealed record BillingSummary(string Provider, int Lifetime, int Subscribed, int Canceling, int PastDue, int Lapsed, int Waiting, int PaidNoPassword);
 
     /// <summary>What an account holds against its limits besides backups: the kept store (history, emoji, GIFs), pictures left for people who are away, and the gateway today. Null when it could not be read.</summary>
     public sealed record AccountUse(long Kept, long Pictures, long GatewayToday);
@@ -31,7 +26,7 @@ internal static class AdminPages
         return share >= 0.9 ? $"<span class=\"pill warn\">{text}</span>" : text;
     }
 
-    private static string E(string? text) => Pages.E(text);
+    internal static string E(string? text) => Pages.E(text);
 
     private static string Mib(long bytes) => (bytes / 1024.0 / 1024.0).ToString("0.0", CultureInfo.InvariantCulture) + " MiB";
 
@@ -42,7 +37,7 @@ internal static class AdminPages
     // The Yaparr icon (assets/logo/yaparr-icon.svg in the app's repository), drawn into the page: the pages load nothing from anywhere else.
     private const string Logo = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true"><defs><linearGradient id="yb" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6A84F5"/><stop offset="1" stop-color="#3A4FD0"/></linearGradient></defs><rect width="256" height="256" rx="58" fill="url(#yb)"/><g stroke-linecap="round" stroke-width="13" fill="none"><path d="M70 92L50 58" stroke="#F2A93B"/><path d="M88 86L80 48" stroke="#F0605F"/><path d="M106 86L112 50" stroke="#F2A93B"/></g><circle cx="86" cy="140" r="56" fill="#fff"/><circle cx="72" cy="158" r="13" fill="#F2A93B" opacity=".35"/><path d="M134 98C168 90 198 104 198 134C188 122 168 118 134 120Z" fill="#F2A93B" transform="rotate(-14 134 109)"/><path d="M134 142C160 144 182 150 186 166C168 176 148 168 134 158Z" fill="#E08A1E"/><path d="M42 112L102 124M102 124L124 98" stroke="#26306B" stroke-width="6" stroke-linecap="round" fill="none"/><circle cx="102" cy="124" r="15" fill="#26306B"/><g stroke="#fff" stroke-width="10" stroke-linecap="round" fill="none"><path d="M208 122a22 22 0 0 1 0 34"/><path d="M222 108a42 42 0 0 1 0 64" opacity=".75"/></g></svg>""";
 
-    private static string Token(string csrf) => $"<input type=\"hidden\" name=\"csrf\" value=\"{E(csrf)}\">";
+    internal static string Token(string csrf) => $"<input type=\"hidden\" name=\"csrf\" value=\"{E(csrf)}\">";
 
     private const string Style = """
         :root {
@@ -156,7 +151,7 @@ internal static class AdminPages
         """;
 
     /// <summary>Every page: the stylesheet, a bar with the name (and, when signed in, who and a sign-out button), and the content.</summary>
-    private static string Shell(string title, string body, string? user = null, string? csrf = null, bool narrow = false) => $$"""
+    internal static string Shell(string title, string body, string? user = null, string? csrf = null, bool narrow = false) => $$"""
         <!doctype html>
         <html lang="en">
         <head>
@@ -183,7 +178,7 @@ internal static class AdminPages
         </html>
         """;
 
-    private static string Alert(string? problem) => problem == null ? "" : $"<div class=\"alert\" role=\"alert\">{E(problem)}</div>";
+    internal static string Alert(string? problem) => problem == null ? "" : $"<div class=\"alert\" role=\"alert\">{E(problem)}</div>";
 
     public static string Login(string username, string? problem) => Shell("Sign in", $"""
         <div class="card login">
@@ -263,79 +258,11 @@ internal static class AdminPages
         _ => "<span class=\"pill warn\">Used up</span>",
     };
 
-    private static string PlanCell(AccountRow row, DateTimeOffset now)
-    {
-        var a = row.Account;
-        if (row.Plan is not { } plan) return "";
-        if (!a.HasPassword && a.Pass == AccountPlan.None)
-            return plan.Paid ? "<span class=\"pill warn\">Paid, no password yet</span>" : "<span class=\"pill warn\">Waiting for payment</span>";
-        return plan.State switch
-        {
-            PlanState.Lifetime => "<span class=\"pill ok\">Lifetime</span>",
-            PlanState.Subscribed when plan.PastDue => $"<span class=\"pill warn\">Payment failing</span> <span class=\"muted\">· until {plan.EndsAt:yyyy-MM-dd}</span>",
-            PlanState.Subscribed when plan.Canceling => $"<span class=\"pill warn\">Ending</span> <span class=\"muted\">· until {plan.EndsAt:yyyy-MM-dd}, then lapses</span>",
-            PlanState.Subscribed => $"<span class=\"pill ok\">Subscribed</span> <span class=\"muted\">· renews {plan.EndsAt:yyyy-MM-dd}</span>",
-            PlanState.Lapsed => $"<span class=\"pill bad\">Lapsed</span>{(plan.EndsAt is { } end ? $" <span class=\"muted\">· ended {end:yyyy-MM-dd}</span>" : " <span class=\"muted\">· never paid</span>")}",
-            _ => "",
-        };
-    }
-
-    private static string PaymentActions(AccountRow row, string token)
-    {
-        var a = row.Account;
-        if (row.Plan is not { } plan) return "";
-        var name = E(a.Name);
-        var buttons = new StringBuilder();
-        if (a.Pass == AccountPlan.Lifetime)
-            buttons.Append($"<form method=\"post\" action=\"/admin/accounts/pass\">{token}<input type=\"hidden\" name=\"name\" value=\"{name}\"><input type=\"hidden\" name=\"pass\" value=\"none\"><button class=\"btn secondary small\" type=\"submit\" aria-label=\"Make {name} pay from now on\">Make it pay</button></form>");
-        else if (a.Pass == AccountPlan.None)
-            buttons.Append($"<form method=\"post\" action=\"/admin/accounts/pass\">{token}<input type=\"hidden\" name=\"name\" value=\"{name}\"><input type=\"hidden\" name=\"pass\" value=\"lifetime\"><button class=\"btn secondary small\" type=\"submit\" aria-label=\"Give {name} the lifetime pass\">Give lifetime</button></form>");
-        if (!a.HasPassword && a.Pass == AccountPlan.None && plan.Paid)
-            buttons.Append($"<form method=\"post\" action=\"/admin/accounts/setup-link\">{token}<input type=\"hidden\" name=\"name\" value=\"{name}\"><button class=\"btn secondary small\" type=\"submit\" aria-label=\"Make a new sign-in link for {name}\">New sign-in link</button></form>");
-        if (plan.Paid)
-            buttons.Append($"<form method=\"post\" action=\"/admin/accounts/subscription/check\">{token}<input type=\"hidden\" name=\"name\" value=\"{name}\"><button class=\"btn secondary small\" type=\"submit\" aria-label=\"Ask the payment provider about {name}\">Check payment</button></form>");
-        if (plan.Running)
-            buttons.Append($"<a class=\"btn link-danger\" href=\"/admin/accounts/subscription?name={Uri.EscapeDataString(a.Name)}\" aria-label=\"End the subscription of {name}\">End subscription</a>");
-        return buttons.ToString();
-    }
-
-    private static string PaymentsCard(BillingSummary b) => $"""
-        <section class="card">
-        <header><div><h2>Payments</h2><p class="muted small">Through <strong>{E(b.Provider)}</strong>. Refund in the provider's dashboard: the subscription ends by itself when a refund goes through. An account that paid and lost the page it was sent back to gets a new link from its row.</p></div></header>
-        <div class="body"><p>
-        <span class="pill ok">{b.Lifetime} lifetime</span>
-        <span class="pill ok">{b.Subscribed} subscribed</span>
-        {(b.Canceling > 0 ? $"<span class=\"pill warn\">{b.Canceling} ending</span>" : "")}
-        {(b.PastDue > 0 ? $"<span class=\"pill warn\">{b.PastDue} payment failing</span>" : "")}
-        <span class="pill {(b.Lapsed > 0 ? "bad" : "ok")}">{b.Lapsed} lapsed</span>
-        {(b.Waiting > 0 ? $"<span class=\"pill warn\">{b.Waiting} waiting for payment</span>" : "")}
-        {(b.PaidNoPassword > 0 ? $"<span class=\"pill warn\">{b.PaidNoPassword} paid, no password yet</span>" : "")}
-        </p></div>
-        </section>
-        """;
-
-    /// <summary>Ending what an account pays for: now (it lapses at once) or when the paid period ends. Asked first, because ending is not undone.</summary>
-    public static string ConfirmEnd(AdminSession session, string name, DateTimeOffset? endsAt, string? problem = null) => Shell("End the subscription of " + name, $"""
-        <div class="card"><div class="body">
-        <h1>End the subscription of {E(name)}?</h1>
-        <p class="muted">Nothing is deleted either way: the account and its backups stay, and it can subscribe again. {(endsAt is { } end ? $"It has paid until <strong>{end:yyyy-MM-dd}</strong>." : "")}</p>
-        {Alert(problem)}
-        <form method="post" action="/admin/accounts/subscription/end">
-        {Token(session.Csrf)}
-        <input type="hidden" name="name" value="{E(name)}">
-        <div class="actions-row">
-        <button class="btn secondary" type="submit" name="when" value="period">Stop it renewing (it ends when the paid period does)</button>
-        <button class="btn danger" type="submit" name="when" value="now">End it now (the account lapses at once)</button>
-        <a class="btn secondary" href="/admin">Cancel</a></div>
-        <p class="muted small">Ending it now does not refund anything: refund in the provider's dashboard if money is owed.</p>
-        </form>
-        </div></div>
-        """, session.User, session.Csrf, narrow: true);
-
     public static string Dashboard(AdminSession session, IReadOnlyList<AccountRow> rows, IReadOnlyList<SignupCodeInfo> codes, DateTimeOffset now, long? diskFree, long? diskTotal,
-        IReadOnlyList<(string Label, StoreStatus Status)>? storage = null, UseLimits? limits = null, BillingSummary? billing = null)
+        IReadOnlyList<(string Label, StoreStatus Status)>? storage = null, UseLimits? limits = null, IReadOnlyList<IAdminView>? extensions = null)
     {
         var token = Token(session.Csrf);
+        var views = extensions ?? Array.Empty<IAdminView>();
 
         var accountRows = new StringBuilder();
         foreach (var row in rows)
@@ -351,7 +278,7 @@ internal static class AdminPages
                 <tr>
                 <td><span class="name">{E(a.Name)}</span>{(a.IsAdmin ? "<span class=\"pill admin\">Admin</span>" : "")}</td>
                 <td>{E(state)}</td>
-                {(billing == null ? "" : $"<td>{PlanCell(row, now)}</td>")}
+                {string.Concat(views.Where(v => v.ColumnTitle != null).Select(v => $"<td>{v.Cell(a)}</td>"))}
                 <td>{backup}</td>
                 <td>{(row.Use is { } u ? Of(u.Kept, l.Kept) : unknown)}</td>
                 <td>{(row.Use is { } p ? Of(p.Pictures, l.Pictures) : unknown)}</td>
@@ -359,7 +286,7 @@ internal static class AdminPages
                 <td class="muted">{a.Created:yyyy-MM-dd}</td>
                 <td class="actions">
                 <form method="post" action="/admin/accounts/password">{token}<input type="hidden" name="name" value="{E(a.Name)}"><button class="btn secondary small" type="submit" aria-label="Reset the password of {E(a.Name)}">Reset password</button></form>
-                {(billing == null ? "" : PaymentActions(row, token))}
+                {string.Concat(views.Select(v => v.Actions(a, session.Csrf)))}
                 <a class="btn link-danger" href="/admin/accounts/remove?name={Uri.EscapeDataString(a.Name)}" aria-label="Remove {E(a.Name)}">Remove</a>
                 </td>
                 </tr>
@@ -416,7 +343,7 @@ internal static class AdminPages
             {disk}
             </div>
 
-            {(billing == null ? "" : PaymentsCard(billing))}
+            {string.Concat(views.Select(v => v.Card()))}
 
             {(storageRows.Length == 0 ? "" : $"""
             <section class="card">
@@ -433,7 +360,7 @@ internal static class AdminPages
             <header><div><h2>Accounts</h2><p class="muted small">Backups are locked on each person's device: nothing here can read one. The columns after Backup are what each account holds against its limits (kept in sync, pictures left for people who are away, and the gateway today); amber is over nine tenths.</p></div></header>
             {(rows.Count == 0 ? "<div class=\"empty\">No accounts yet.</div>" : $"""
             <div class="scroll"><table>
-            <thead><tr><th>Account</th><th>State</th>{(billing == null ? "" : "<th>Plan</th>")}<th>Backup</th><th>Kept in sync</th><th>Pictures left</th><th>Gateway today</th><th>Made</th><th></th></tr></thead>
+            <thead><tr><th>Account</th><th>State</th>{string.Concat(views.Where(v => v.ColumnTitle != null).Select(v => $"<th>{E(v.ColumnTitle)}</th>"))}<th>Backup</th><th>Kept in sync</th><th>Pictures left</th><th>Gateway today</th><th>Made</th><th></th></tr></thead>
             <tbody>
             {accountRows}
             </tbody></table></div>

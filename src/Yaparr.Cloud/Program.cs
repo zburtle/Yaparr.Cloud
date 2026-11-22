@@ -27,6 +27,13 @@ builder.Services.AddSingleton<IBackupStore>(_ => Stores.Backups(options));
 builder.Services.AddSingleton<IAccounts>(_ => Stores.Accounts(options));
 builder.Services.AddSingleton<ISignupCodes>(_ => Stores.Codes(options));
 builder.Services.AddSingleton<ISubscriptions>(_ => Stores.Subscriptions(options));
+// A provider is only made when it is the one named, and only when it is set up: a half-set Polar is said at the start, with the name of what is missing.
+if (options.Billing.Provider.Equals(PolarBilling.ProviderName, StringComparison.OrdinalIgnoreCase))
+{
+    if (PolarBilling.Missing(options.Billing.Polar) is { } missing)
+        throw new InvalidOperationException($"Service__Billing__Provider is \"polar\", but {missing} is not set.");
+    builder.Services.AddSingleton<IBillingProvider>(_ => new PolarBilling(options.Billing.Polar, PolarBilling.CreateClient(options.Billing.Polar)));
+}
 builder.Services.AddSingleton<PlanGate>();
 builder.Services.AddSingleton<BillingService>();
 builder.Services.AddSingleton<BillingTickets>();

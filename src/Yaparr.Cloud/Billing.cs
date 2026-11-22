@@ -122,6 +122,9 @@ public sealed class BillingOptions
 
     /// <summary>Hours that an account made for someone who has not paid yet is kept (24).</summary>
     public int PendingHours { get; set; } = 24;
+
+    /// <summary>The settings of Polar (<c>Service__Billing__Polar__…</c>), used when <see cref="Provider"/> is <c>polar</c>.</summary>
+    public PolarOptions Polar { get; set; } = new();
 }
 
 // ---- what a payment provider has to be (design: "The provider interface") ----

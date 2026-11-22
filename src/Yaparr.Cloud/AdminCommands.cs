@@ -256,18 +256,9 @@ public static class AdminCommands
             {
                 var name = rest.Count == 1 ? AccountDirectory.Normalize(rest[0]) : null;
                 if (name == null) { output.Write(Usage); return 2; }
-                if (!accounts.Exists(name)) { output.WriteLine("There is no such account."); return 1; }
-                if (!Stores.Subscriptions(options).Of(name).Any())
-                {
-                    output.WriteLine("It has paid for nothing, so there is nothing to finish: it starts again from the subscribe page.");
-                    return 1;
-                }
-                if (accounts.StartPending(name, TimeSpan.FromHours(Math.Max(1, options.Billing.PendingHours))) is not { } token)
-                {
-                    output.WriteLine("It already has a password (or a pass of its own), so it signs in. To change the password: accounts password <email>.");
-                    return 1;
-                }
-                output.WriteLine($"{options.PublicUrl.Trim().TrimEnd('/')}/billing/done?t={Uri.EscapeDataString(token)}");
+                var (link, problem) = BillingAdmin.SetupLink(accounts, Stores.Subscriptions(options), options, name);
+                if (link == null) { output.WriteLine(problem); return 1; }
+                output.WriteLine(link);
                 output.WriteLine($"Give that link to {name} and nobody else: it lets whoever opens it choose the password. It works once and for {Math.Max(1, options.Billing.PendingHours)} hours, and the link they had stops working.");
                 return 0;
             }

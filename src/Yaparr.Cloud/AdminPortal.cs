@@ -76,9 +76,9 @@ public static class AdminPortal
 
         // ---- the overview ----
 
-        admin.MapGet("", async (HttpContext http, IAccounts accounts, AdminSessions sessions, IBackupStore store, ISignupCodes codes, IKeepStore kept, IBlobStore pictures, GatewayRegistry gateway) =>
+        admin.MapGet("", async (HttpContext http, IAccounts accounts, AdminSessions sessions, IBackupStore store, ISignupCodes codes, IKeepStore kept, IBlobStore pictures, GatewayRegistry gateway, PlanGate gate, ISubscriptions subscriptions) =>
             Current(http, accounts, sessions) is { } session
-                ? Html(http, await DashboardAsync(session, options, accounts, store, codes, kept, pictures, gateway))
+                ? Html(http, await DashboardAsync(session, options, accounts, store, codes, kept, pictures, gateway, gate, subscriptions))
                 : Results.Redirect("/admin/login"));
 
         // ---- accounts ----
@@ -125,6 +125,63 @@ public static class AdminPortal
             var (_, hadBackup) = await AccountErasure.EraseAsync(name, accounts, store, push, sync, mailbox: mailbox, blobs: blobs, kept: kept, subscriptions: subscriptions);
             log.LogInformation("Admin {Admin} removed the account {Account} ({Backup})", session.User, name, hadBackup ? "its backup was deleted" : "it had no backup");
             return Html(http, AdminPages.Result($"Removed {name}", hadBackup ? "Its backup was deleted." : "It had no backup."));
+        })).DisableAntiforgery();
+
+        // ---- payments (only when billing is on) ----
+
+        admin.MapPost("/accounts/pass", (HttpContext http, IAccounts accounts, AdminSessions sessions, PlanGate gate, ISubscriptions subscriptions) => Post(http, accounts, sessions, (session, form) =>
+        {
+            if (!gate.Enabled) return Task.FromResult(Results.NotFound());
+            var pass = form["pass"].ToString();
+            if (AccountDirectory.Normalize(form["name"].ToString()) is not { } name || !AccountPlan.IsPass(pass) || !accounts.SetPass(name, pass))
+                return Task.FromResult(Html(http, AdminPages.Result("There is no such account", "It may have been removed."), StatusCodes.Status404NotFound));
+            log.LogInformation("Admin {Admin} set the pass of {Account} to {Pass}", session.User, name, pass);
+            var text = pass == AccountPlan.Lifetime
+                ? $"{name} has the lifetime pass now: it is never asked to pay."
+                : $"{name} no longer has the lifetime pass: it follows its subscriptions, and lapses if it has none.";
+            if (pass == AccountPlan.Lifetime && BillingAdmin.StillCharged(subscriptions, name) is { } charged) text += " " + charged;
+            return Task.FromResult(Html(http, AdminPages.Result("The pass was changed", text, session)));
+        })).DisableAntiforgery();
+
+        admin.MapPost("/accounts/setup-link", (HttpContext http, IAccounts accounts, AdminSessions sessions, PlanGate gate, ISubscriptions subscriptions) => Post(http, accounts, sessions, (session, form) =>
+        {
+            if (!gate.Enabled) return Task.FromResult(Results.NotFound());
+            if (AccountDirectory.Normalize(form["name"].ToString()) is not { } name)
+                return Task.FromResult(Html(http, AdminPages.Result("There is no such account", "It may have been removed."), StatusCodes.Status404NotFound));
+            var (link, problem) = BillingAdmin.SetupLink(accounts, subscriptions, options, name);
+            if (link == null) return Task.FromResult(Html(http, AdminPages.Result("No link was made", problem!, session), StatusCodes.Status409Conflict));
+            log.LogInformation("Admin {Admin} made a new sign-in link for {Account}", session.User, name);
+            return Task.FromResult(Html(http, AdminPages.Secret($"New sign-in link for {name}", $"Give it to them and nobody else: whoever opens it chooses the password. It works once and for {Math.Max(1, options.Billing.PendingHours)} hours, and the link they had stops working.", link, session)));
+        })).DisableAntiforgery();
+
+        admin.MapPost("/accounts/subscription/check", (HttpContext http, IAccounts accounts, AdminSessions sessions, PlanGate gate, BillingService billing) => Post(http, accounts, sessions, async (session, form) =>
+        {
+            if (!gate.Enabled) return Results.NotFound();
+            if (AccountDirectory.Normalize(form["name"].ToString()) is not { } name || !accounts.Exists(name))
+                return Html(http, AdminPages.Result("There is no such account", "It may have been removed."), StatusCodes.Status404NotFound);
+            if (!await billing.RefreshAccountAsync(name, http.RequestAborted))
+                return Html(http, AdminPages.Result("The payment provider could not be reached", "Nothing was changed. Try again in a minute.", session), StatusCodes.Status503ServiceUnavailable);
+            var now = gate.Describe(name);
+            return Html(http, AdminPages.Result("Asked the payment provider", $"{name} is {now.State.ToString().ToLowerInvariant()}{(now.EndsAt is { } end ? $", to {end:yyyy-MM-dd}" : "")}.", session));
+        })).DisableAntiforgery();
+
+        admin.MapGet("/accounts/subscription", (HttpContext http, IAccounts accounts, AdminSessions sessions, PlanGate gate, string? name) =>
+            Current(http, accounts, sessions) is not { } session ? Results.Redirect("/admin/login")
+            : !gate.Enabled ? Results.NotFound()
+            : AccountDirectory.Normalize(name) is { } who && accounts.Exists(who)
+                ? Html(http, AdminPages.ConfirmEnd(session, who, gate.Describe(who).EndsAt))
+                : Html(http, AdminPages.Result("There is no such account", "It may have been removed."), StatusCodes.Status404NotFound));
+
+        admin.MapPost("/accounts/subscription/end", (HttpContext http, IAccounts accounts, AdminSessions sessions, PlanGate gate, BillingService billing) => Post(http, accounts, sessions, async (session, form) =>
+        {
+            if (!gate.Enabled) return Results.NotFound();
+            var when = form["when"].ToString();
+            if (AccountDirectory.Normalize(form["name"].ToString()) is not { } name || !accounts.Exists(name) || when is not ("now" or "period"))
+                return Html(http, AdminPages.Result("There is no such account", "It may have been removed."), StatusCodes.Status404NotFound);
+            if (!await billing.EndAsync(name, immediately: when == "now", http.RequestAborted))
+                return Html(http, AdminPages.Result("It could not be ended everywhere", "The payment provider could not be reached or did not answer for every subscription. Check the account again in a minute, or end it in the provider's dashboard.", session), StatusCodes.Status503ServiceUnavailable);
+            log.LogInformation("Admin {Admin} ended the subscription of {Account} ({When})", session.User, name, when == "now" ? "now" : "at the end of the period");
+            return Html(http, AdminPages.Result("Ended", when == "now" ? $"{name}'s subscription was ended; it lapses now." : $"{name}'s subscription will not renew; it ends with the paid period.", session));
         })).DisableAntiforgery();
 
         // ---- signup codes ----
@@ -204,7 +261,33 @@ public static class AdminPortal
         return await action(session, form);
     }
 
-    private static async Task<string> DashboardAsync(AdminSession session, ServiceOptions options, IAccounts accounts, IBackupStore store, ISignupCodes codes, IKeepStore kept, IBlobStore pictures, GatewayRegistry gateway)
+    private static AdminPages.PlanInfo PlanOf(string name, ServiceOptions options, PlanGate gate, ISubscriptions subscriptions, DateTimeOffset now)
+    {
+        var grace = TimeSpan.FromDays(Math.Max(0, options.Billing.GraceDays));
+        var subs = subscriptions.Of(name);
+        var covering = subs.Where(s => AccountPlan.Covers(s, now, grace)).ToList();
+        var described = gate.Describe(name);
+        return new AdminPages.PlanInfo(described.State,
+            PastDue: covering.Any(s => s.Status == SubscriptionStatus.PastDue) && !covering.Any(s => s.Status == SubscriptionStatus.Active),
+            Canceling: covering.Count > 0 && covering.All(s => s.Status == SubscriptionStatus.Canceling),
+            described.EndsAt, Paid: subs.Count > 0, Running: subs.Any(s => s.Status != SubscriptionStatus.Ended));
+    }
+
+    private static AdminPages.BillingSummary Summary(ServiceOptions options, IReadOnlyList<AccountEntry> accounts, IReadOnlyList<AdminPages.AccountRow> rows)
+    {
+        int Count(Func<AdminPages.AccountRow, bool> where) => rows.Count(where);
+        bool Pending(AdminPages.AccountRow r) => !r.Account.HasPassword && r.Account.Pass == AccountPlan.None;
+        return new AdminPages.BillingSummary(options.Billing.Provider,
+            Lifetime: Count(r => !Pending(r) && r.Plan?.State == PlanState.Lifetime),
+            Subscribed: Count(r => !Pending(r) && r.Plan?.State == PlanState.Subscribed && !r.Plan.Canceling && !r.Plan.PastDue),
+            Canceling: Count(r => !Pending(r) && r.Plan?.State == PlanState.Subscribed && r.Plan.Canceling),
+            PastDue: Count(r => !Pending(r) && r.Plan?.State == PlanState.Subscribed && r.Plan.PastDue),
+            Lapsed: Count(r => !Pending(r) && r.Plan?.State == PlanState.Lapsed),
+            Waiting: Count(r => Pending(r) && r.Plan is { Paid: false }),
+            PaidNoPassword: Count(r => Pending(r) && r.Plan is { Paid: true }));
+    }
+
+    private static async Task<string> DashboardAsync(AdminSession session, ServiceOptions options, IAccounts accounts, IBackupStore store, ISignupCodes codes, IKeepStore kept, IBlobStore pictures, GatewayRegistry gateway, PlanGate gate, ISubscriptions subscriptions)
     {
         // What is stored comes in one pass, not one request for each account (backups may be in a bucket across the internet); if the store is down the page still
         // comes, with the problem in the Storage card and the backup columns marked as not available.
@@ -231,8 +314,9 @@ public static class AdminPortal
             var use = keptUse != null && pictureUse != null
                 ? new AdminPages.AccountUse(keptUse.GetValueOrDefault(a.Name), pictureUse.GetValueOrDefault(a.Name), gateway.UsedToday(a.Name))
                 : null;
-            return new AdminPages.AccountRow(a, found?.Versions ?? 0, found?.Bytes ?? 0, found?.Last, Known: summaries != null, Use: use);
+            return new AdminPages.AccountRow(a, found?.Versions ?? 0, found?.Bytes ?? 0, found?.Last, Known: summaries != null, Use: use, Plan: gate.Enabled ? PlanOf(a.Name, options, gate, subscriptions, nowUtc) : null);
         }).ToList();
+        var billing = gate.Enabled ? Summary(options, listed, rows) : null;
 
         // Where things are kept, and whether they answer, all asked at once.
         var accountsStatus = accounts.StatusAsync();
@@ -257,6 +341,6 @@ public static class AdminPortal
             catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException) { }
         }
 
-        return AdminPages.Dashboard(session, rows, codes.List(), DateTimeOffset.UtcNow, free, total, storage, new AdminPages.UseLimits(options.KeepQuotaBytes, options.BlobQuotaBytes, options.GatewayBytesPerDay));
+        return AdminPages.Dashboard(session, rows, codes.List(), DateTimeOffset.UtcNow, free, total, storage, new AdminPages.UseLimits(options.KeepQuotaBytes, options.BlobQuotaBytes, options.GatewayBytesPerDay), billing);
     }
 }

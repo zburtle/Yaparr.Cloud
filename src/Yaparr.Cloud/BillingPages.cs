@@ -43,6 +43,16 @@ public static class BillingPages
         <input id="password" name="password" type="password" autocomplete="current-password" required{(username.Length == 0 ? "" : " autofocus")}>
         <button type="submit">Continue</button>
         </form>
+        <hr>
+        <h2>No account yet?</h2>
+        <p class="muted">Subscribe to make one. You pay first, then choose your password. The price is shown on the payment page.</p>
+        <form method="post" action="/billing/start">
+        <label for="new-email">Email address</label>
+        <input id="new-email" name="email" type="email" autocomplete="email" autocapitalize="none" spellcheck="false" maxlength="254" required>
+        <label for="interval">Pay</label>
+        <select id="interval" name="interval"><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select>
+        <button type="submit">Go to payment</button>
+        </form>
         """);
 
     /// <param name="ticket">What stands for the password just typed, for the buttons below (<see cref="BillingTickets"/>).</param>

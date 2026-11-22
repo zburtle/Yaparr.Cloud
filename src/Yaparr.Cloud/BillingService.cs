@@ -250,6 +250,25 @@ public sealed class BillingService
     /// Ends everything an account is paying for, at once, so that deleting it does not leave it being charged. True when nothing is left running (there was nothing, or it was all ended);
     /// false when a provider could not be asked, and then the account is not to be deleted.
     /// </summary>
+    /// <summary>
+    /// Ends what an account pays for, now or at the end of the paid period, and then asks the provider what it holds so that what is stored is its answer. False if a provider could not be asked.
+    /// </summary>
+    public async Task<bool> EndAsync(string account, bool immediately, CancellationToken cancel)
+    {
+        var done = true;
+        foreach (var s in _subscriptions.Of(account).Where(s => s.Status != SubscriptionStatus.Ended))
+        {
+            if (Provider(s.Provider) is not { } provider) { done = false; continue; }
+            try { await provider.CancelAsync(s.ProviderSubscriptionId, immediately, cancel); }
+            catch (Exception ex) when (Unreachable(ex, cancel))
+            {
+                _log.LogWarning("billing: could not end a subscription ({Provider})", provider.Name);
+                done = false;
+            }
+        }
+        return await RefreshAccountAsync(account, cancel) && done;
+    }
+
     public async Task<bool> CancelAllAsync(string account, CancellationToken cancel)
     {
         var allEnded = true;

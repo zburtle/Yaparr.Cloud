@@ -36,6 +36,13 @@ services:
       # Push notifications through Firebase: the path, inside the container, of the service account key (README, "Push notifications"). Mount the file read-only
       # under volumes below, outside the repository. Empty: only UnifiedPush works.
       Service__PushFcmServiceAccountFile: "${PUSH_FCM_SERVICE_ACCOUNT_FILE:-}"
+      # Paid plans (README, "Paid plans"): off while BILLING_PROVIDER is empty. The Polar secrets live in .env on the host, never in this file or the repository.
+      Service__Billing__Provider: "${BILLING_PROVIDER:-}"
+      Service__Billing__Polar__Server: "${POLAR_SERVER:-production}"
+      Service__Billing__Polar__AccessToken: "${POLAR_ACCESS_TOKEN:-}"
+      Service__Billing__Polar__WebhookSecret: "${POLAR_WEBHOOK_SECRET:-}"
+      Service__Billing__Polar__CloudMonthlyProduct: "${POLAR_CLOUD_MONTHLY_PRODUCT:-}"
+      Service__Billing__Polar__CloudYearlyProduct: "${POLAR_CLOUD_YEARLY_PRODUCT:-}"
       # Service__KeepVersions: "3"      # the newest versions always kept ...
       # Service__KeepDays: "7"          # ... and the newest of each of this many days
       # Service__WritesPerHour: "12"

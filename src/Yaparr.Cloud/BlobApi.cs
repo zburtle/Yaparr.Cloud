@@ -12,9 +12,10 @@ internal static class BlobApi
         var blobs = app.MapGroup("/v1/blob");
         var keep = TimeSpan.FromDays(Math.Max(1, options.BlobKeepDays));
 
-        blobs.MapPut("{id}", async (HttpContext http, string id, IAccounts accounts, IBlobStore store, WakeLimiter limiter) =>
+        blobs.MapPut("{id}", async (HttpContext http, string id, IAccounts accounts, IBlobStore store, WakeLimiter limiter, PlanGate gate) =>
         {
             if (accounts.UserOfToken(PushApi.Bearer(http)) is not { } user) return PushApi.Problem(StatusCodes.Status401Unauthorized, "This device is not signed in. Sign in again.");
+            if (gate.Refuse(user) is { } refused) return refused;
             if (!BlobRules.GoodId(id)) return PushApi.Problem(StatusCodes.Status400BadRequest, "That is not a blob id.");
             if (http.Request.ContentLength is { } declared && declared > options.BlobMaxBytes) return PushApi.Problem(StatusCodes.Status413PayloadTooLarge, $"A blob is at most {options.BlobMaxBytes} bytes.");
             if (!limiter.TryTake("blob:" + user, options.BlobUploadsPerMinute, options.BlobUploadsPerDay))

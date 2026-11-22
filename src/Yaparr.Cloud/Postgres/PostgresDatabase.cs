@@ -10,7 +10,7 @@ namespace Yaparr.Cloud;
 public static class PostgresDatabase
 {
     /// <summary>The version of the schema this build makes and expects. A database from a newer build is refused rather than damaged.</summary>
-    public const int SchemaVersion = 5;
+    public const int SchemaVersion = 6;
 
     private static readonly object Gate = new();
     private static readonly Dictionary<string, NpgsqlDataSource> Sources = new();
@@ -179,6 +179,40 @@ public static class PostgresDatabase
                 insert into schema_version (version) values (5);
                 """, connection, transaction);
             v5.ExecuteNonQuery();
+        }
+        if (current < 6)
+        {
+            // Paid plans (docs/billing.md): what a provider says each subscription is, the random id each account is known by to a provider, and the webhook events handled. Additive.
+            using var v6 = new NpgsqlCommand("""
+                create table subscriptions (
+                    provider text not null,
+                    provider_subscription_id text not null,
+                    account text not null,
+                    provider_customer_id text not null,
+                    plan text not null,
+                    status integer not null,
+                    period_end timestamptz not null,
+                    updated timestamptz not null,
+                    primary key (provider, provider_subscription_id)
+                );
+                create index subscriptions_account on subscriptions (account, period_end);
+
+                create table billing_accounts (
+                    account text primary key,
+                    billing_id text not null unique
+                );
+
+                create table billing_events (
+                    provider text not null,
+                    event_id text not null,
+                    received timestamptz not null,
+                    primary key (provider, event_id)
+                );
+                create index billing_events_received on billing_events (received);
+
+                insert into schema_version (version) values (6);
+                """, connection, transaction);
+            v6.ExecuteNonQuery();
         }
         transaction.Commit();
     }

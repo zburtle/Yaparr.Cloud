@@ -108,6 +108,7 @@ The pages are plain HTML with no scripts, are never cached or framed, and everyt
 | `POST /v1/push/wake/{token}` | no account | `202` sent; `404` no such token; `410` the push service says the device is gone (it is forgotten); `429` too often; `502` could not send |
 | `GET /v1/sync[?since=n&limit=k]` | `Bearer` | `{cursor, more, records:[{kind,id,clock,device,deleted,body,cursor}]}`: the records changed after cursor `n` (0 for all), oldest change first, at most 100; `cursor` is where to ask next |
 | `PUT /v1/sync` | `Bearer`; `{records:[{kind,id,clock,device,deleted,body}]}` (1 to 100) | `{cursor, stale:["kind/id"]}`; a record whose clock is not newer than the one held is named in `stale` and not taken; `400` for a bad record (nothing is stored), `409` past the account's record limit, `429` too often |
+| `GET /v1/plan` | `Bearer` | `{billing:"off"}` when billing is off, else `{billing:"on", state:"lifetime"\|"subscribed"\|"lapsed", plan, endsAt, willRenew}` (see *Paid plans*) |
 | `GET /healthz` | | `200` |
 
 Everything under `/v1/backup` needs `Authorization: Bearer <token>`; without a token the service gave out, the answer is `401`. `If-Match` is what keeps two devices from overwriting each other, and also makes a replayed upload a `409` instead of a second copy.
@@ -188,9 +189,29 @@ What a signed-in device can ask about its own account, for the apps to show: whi
 - `GET /v1/usage`: `{kept: {usedBytes, quotaBytes}, pictures: {usedBytes, quotaBytes, keptDays}, backups: {count, bytes}, gateway: {enabled, usedTodayBytes, perDayBytes, bytesPerSecond}}`: what the account keeps in sync, what it has left for someone who is away, its backups, and how much of today's gateway allowance it has used (all by UTC day).
 - The gateway's daily bytes are kept in `gateway-usage.json` in the data folder (by a short hash of the account, not its name), written now and then and when the service stops, so a restart (every deploy) does not hand everyone a new day. The gateway also limits an address (`GatewayConnectionsPerAddress`, 10 connections at once, and `GatewayAttemptsPerMinute`, 30 tries in a minute, wrong tokens included), as well as an account.
 
+### Paid plans (`PlanGate`; off unless a provider is named)
+
+The hosted service can ask for a subscription (design: `docs/billing.md` in the Yaparr repository). **A service that does not turn it on is exactly what it was**, so a server run for friends or for one network never sees any of this. It is on only when `Service__Billing__Provider` names a payment provider this build has; naming one it has not stops the service starting, and says which it has. This build has the model and the rules and **no provider yet**, so nothing can be paid for through it: the providers (Polar first) and the pages that take a payment come next.
+
+What an account is (`AccountPlan`, `PlanGate`):
+
+| State | When | Signing in on a device | Syncing and the services | Taking data away, deleting, the account pages |
+|---|---|---|---|---|
+| `lifetime` | the account's pass is `lifetime`: every account made before billing, by `accounts add` or a signup code | yes | yes | yes |
+| `subscribed` | some subscription has a paid period that has not ended, plus `Billing__GraceDays` (3) | yes | yes | yes |
+| `lapsed` | billing is on, the pass is `none`, and no subscription covers now | **no** | **no** | yes |
+
+A lapsed account is refused with `402` `{"error": "<a sentence>", "code": "subscription_required"}` at: signing in (`POST /login` shows a page, `POST /v1/token` and `/v1/token/handoff` answer `402`), `GET` and `PUT /v1/sync`, `PUT /v1/backup`, `GET` and `POST /v1/mailbox/{id}`, `PUT /v1/blob/{id}`, `PUT /v1/keep/{id}`, `PUT /v1/push` and the gateway; a wake for its push token answers like a token that leads nowhere (`404`; the registration is kept). It can still read its plan, usage and devices, `GET /v1/backup` and `GET /v1/keep/{id}` (the data is theirs to take away), do every `DELETE`, and use the `/account/*` pages. **Nothing is ever removed when an account lapses**, a device that is already signed in keeps its token, and renewing brings everything back with no sign-in.
+
+- **Subscriptions** are kept by `ISubscriptions` (`subscriptions.json` in the data folder, or the database, schema 6: `subscriptions`, `billing_accounts`, `billing_events`), held to the same behaviour by the same tests as the other stores. A subscription is what a provider last said: its status (`Active`, `PastDue`, `Canceling`, `Ended`) and the end of the paid period. `Ended` gives nothing, whatever its dates say. Each account is known to a provider by a random **billing id**, never by its email address.
+- **Passes:** `accounts pass <email> lifetime|none`. `lifetime` is never asked to pay; `none` follows the subscriptions. Giving `lifetime` to an account that is being charged says to cancel it where it is charged.
+- **`accounts list`** shows each account's state when billing is on.
+- **Deleting an account** removes its subscriptions and billing id here. (Cancelling at the provider comes with the provider.)
+- **Not done yet:** a provider, the webhook, the pages to pay and to manage a subscription, and showing the state in the admin portal.
+
 ### Limits (`appsettings.json`, section `Service`, or `Service__Name` environment variables)
 
-`MaxBlobBytes` (512 MiB), `KeepVersions` (3) and `KeepDays` (7), `RequestsPerMinute` per address (120), `WritesPerHour` per account (12), `DataDirectory` (`data`), `PublicUrl` (`https://cloud.yaparr.com`), `SignupPageUrl` (`https://yaparr.com/signup`), `BehindProxy`, and for push notifications `PushWakesPerMinute`, `PushWakesPerDay`, `PushMaxPerAccount` and `PushFcmServiceAccountFile`, and for synced state `SyncMaxRecords`, `SyncMaxRecordBytes`, `SyncWritesPerMinute` and `SyncWritesPerDay`, and for pictures `BlobMaxBytes`, `BlobQuotaBytes`, `BlobKeepDays`, `BlobUploadsPerMinute` and `BlobUploadsPerDay`, and for mailboxes `MailboxKeepDays`, `MailboxMaxItems`, `MailboxMaxItemChars`, `MailboxPostsPerMinute`, `MailboxPostsPerDay`, `MailboxReadsPerMinute` and `MailboxReadsPerDay`.
+`MaxBlobBytes` (512 MiB), `KeepVersions` (3) and `KeepDays` (7), `RequestsPerMinute` per address (120), `WritesPerHour` per account (12), `DataDirectory` (`data`), `Billing` (`Provider`, `GraceDays`, `PendingHours`; see *Paid plans*), `PublicUrl` (`https://cloud.yaparr.com`), `SignupPageUrl` (`https://yaparr.com/signup`), `BehindProxy`, and for push notifications `PushWakesPerMinute`, `PushWakesPerDay`, `PushMaxPerAccount` and `PushFcmServiceAccountFile`, and for synced state `SyncMaxRecords`, `SyncMaxRecordBytes`, `SyncWritesPerMinute` and `SyncWritesPerDay`, and for pictures `BlobMaxBytes`, `BlobQuotaBytes`, `BlobKeepDays`, `BlobUploadsPerMinute` and `BlobUploadsPerDay`, and for mailboxes `MailboxKeepDays`, `MailboxMaxItems`, `MailboxMaxItemChars`, `MailboxPostsPerMinute`, `MailboxPostsPerDay`, `MailboxReadsPerMinute` and `MailboxReadsPerDay`.
 
 Set `BehindProxy` to `true` only when a reverse proxy is in front (it should be, for https): then the caller's address comes from `X-Forwarded-For`. Left on without a proxy, anyone can claim any address.
 

@@ -15,6 +15,12 @@ public interface IAccounts
     /// <summary>True if the account exists and has chosen a password, so it is for signing in and not for signing up.</summary>
     bool HasPassword(string name);
 
+    /// <summary>The account's pass (<see cref="AccountPlan.Lifetime"/> or <see cref="AccountPlan.None"/>), or null if there is no such account. Only matters once billing is on.</summary>
+    string? PassOf(string name);
+
+    /// <summary>Gives an account a pass (<see cref="AccountPlan.IsPass"/>). False if there is no such account or it is not a pass.</summary>
+    bool SetPass(string name, string pass);
+
     IReadOnlyList<AccountEntry> List();
 
     /// <summary>Adds an account with a password. False if the name is taken.</summary>

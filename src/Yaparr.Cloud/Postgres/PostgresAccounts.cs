@@ -66,6 +66,10 @@ public sealed class PostgresAccounts : IAccounts
 
     public bool HasPassword(string name) => Scalar<bool?>("select password_hash is not null from accounts where name = @n", ("n", name)) == true;
 
+    public string? PassOf(string name) => Scalar<string>("select pass from accounts where name = @n", ("n", name));
+
+    public bool SetPass(string name, string pass) => AccountPlan.IsPass(pass) && Run("update accounts set pass = @p where name = @n", ("p", pass), ("n", name)) == 1;
+
     public IReadOnlyList<AccountEntry> List()
     {
         using var c = _db.OpenConnection();

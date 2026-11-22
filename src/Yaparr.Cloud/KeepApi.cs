@@ -14,9 +14,10 @@ internal static class KeepApi
         // Nothing expires: a keeping time no clock reaches.
         var forever = TimeSpan.FromDays(36500);
 
-        keep.MapPut("{id}", async (HttpContext http, string id, IAccounts accounts, IKeepStore store, WakeLimiter limiter) =>
+        keep.MapPut("{id}", async (HttpContext http, string id, IAccounts accounts, IKeepStore store, WakeLimiter limiter, PlanGate gate) =>
         {
             if (accounts.UserOfToken(PushApi.Bearer(http)) is not { } user) return PushApi.Problem(StatusCodes.Status401Unauthorized, "This device is not signed in. Sign in again.");
+            if (gate.Refuse(user) is { } refused) return refused;
             if (!BlobRules.GoodId(id)) return PushApi.Problem(StatusCodes.Status400BadRequest, "That is not a piece id.");
             if (http.Request.ContentLength is { } declared && declared > options.KeepMaxBytes) return PushApi.Problem(StatusCodes.Status413PayloadTooLarge, $"A piece is at most {options.KeepMaxBytes} bytes.");
             if (!limiter.TryTake("keep:" + user, options.KeepUploadsPerMinute, options.KeepUploadsPerDay))

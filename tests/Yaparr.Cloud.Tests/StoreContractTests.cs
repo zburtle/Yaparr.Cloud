@@ -51,6 +51,8 @@ public abstract class StoreContractTests : IDisposable
 
     protected abstract IPushRegistry NewPush();
 
+    protected abstract ISubscriptions NewSubscriptions();
+
     public virtual void Dispose() { }
 
     // ---- accounts ----
@@ -588,6 +590,121 @@ public abstract class StoreContractTests : IDisposable
         Assert.DoesNotContain("secret", listed.ToString());
         Assert.True(listed.Created > now - TimeSpan.FromDays(3650));
     }
+
+    // ---- passes and subscriptions (docs/billing.md) ----
+
+    [SkippableFact]
+    public void An_account_has_the_lifetime_pass_until_it_is_taken_away_and_only_a_pass_that_exists_can_be_given()
+    {
+        var accounts = NewAccounts();
+        Assert.Null(accounts.PassOf("sam@example.com"));
+        Assert.False(accounts.SetPass("sam@example.com", AccountPlan.None));   // no such account
+
+        accounts.Add("sam@example.com", Password);
+        Assert.Equal(AccountPlan.Lifetime, accounts.PassOf("sam@example.com"));
+        Assert.True(accounts.SetPass("sam@example.com", AccountPlan.None));
+        Assert.Equal("none", accounts.PassOf("sam@example.com"));
+        Assert.False(accounts.SetPass("sam@example.com", "gold"));
+        Assert.Equal("none", accounts.PassOf("sam@example.com"));
+        Assert.True(accounts.SetPass("sam@example.com", AccountPlan.Lifetime));
+        Assert.Equal(AccountPlan.Lifetime, accounts.PassOf("sam@example.com"));
+
+        // Giving one is not a way to change anything else about the account.
+        Assert.True(accounts.CheckPassword("sam@example.com", Password));
+    }
+
+    private static readonly DateTimeOffset Epoch = new(2026, 11, 20, 12, 0, 0, TimeSpan.Zero);
+
+    private static Subscription Sub(string account, string id, SubscriptionStatus status = SubscriptionStatus.Active, int days = 30, string provider = "polar") =>
+        new(account, provider, "cus_" + account, id, "cloud", status, Epoch.AddDays(days), Epoch);
+
+    [SkippableFact]
+    public void A_subscription_is_stored_again_in_place_of_the_same_one_and_listed_for_its_own_account_newest_first()
+    {
+        var store = NewSubscriptions();
+        Assert.Empty(store.Of("sam@example.com"));
+
+        store.Upsert(Sub("sam@example.com", "sub_1", days: 10));
+        store.Upsert(Sub("sam@example.com", "sub_2", days: 40));
+        store.Upsert(Sub("kim@example.com", "sub_3"));
+        Assert.Equal(new[] { "sub_2", "sub_1" }, store.Of("sam@example.com").Select(s => s.ProviderSubscriptionId));
+        Assert.Equal(new[] { "sub_3" }, store.Of("kim@example.com").Select(s => s.ProviderSubscriptionId));
+
+        // The provider says it is now over: the same subscription, not a second one.
+        store.Upsert(Sub("sam@example.com", "sub_2", SubscriptionStatus.Ended, days: 5));
+        var again = store.Of("sam@example.com");
+        Assert.Equal(2, again.Count);
+        var changed = again.Single(s => s.ProviderSubscriptionId == "sub_2");
+        Assert.Equal((SubscriptionStatus.Ended, Epoch.AddDays(5), "cloud", "cus_sam@example.com", "polar"), (changed.Status, changed.PeriodEnd, changed.Plan, changed.ProviderCustomerId, changed.Provider));
+
+        // The same id at another provider is another subscription.
+        store.Upsert(Sub("sam@example.com", "sub_2", provider: "stripe"));
+        Assert.Equal(3, store.Of("sam@example.com").Count);
+    }
+
+    [SkippableFact]
+    public void An_account_is_known_to_a_provider_by_a_random_id_that_stays_the_same_and_leads_back_to_it()
+    {
+        var store = NewSubscriptions();
+        var sam = store.BillingIdOf("sam@example.com");
+        var kim = store.BillingIdOf("kim@example.com");
+        Assert.Equal(22, sam.Length);                       // 128 bits
+        Assert.Matches("^[A-Za-z0-9_-]+$", sam);
+        Assert.NotEqual(sam, kim);
+        Assert.DoesNotContain("sam", sam, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(sam, store.BillingIdOf("sam@example.com"));
+        Assert.Equal(sam, NewSubscriptions().BillingIdOf("sam@example.com"));   // kept, not only remembered
+
+        Assert.Equal("sam@example.com", store.AccountOf(sam));
+        Assert.Equal("kim@example.com", store.AccountOf(kim));
+        Assert.Null(store.AccountOf("nobody"));
+        Assert.Null(store.AccountOf(""));
+        Assert.Null(store.AccountOf(null));
+    }
+
+    [SkippableFact]
+    public void A_webhook_event_is_handled_once_and_can_be_forgotten_so_that_it_is_tried_again()
+    {
+        var store = NewSubscriptions();
+        Assert.True(store.TryRecordEvent("polar", "evt_1", Epoch));
+        Assert.False(store.TryRecordEvent("polar", "evt_1", Epoch.AddMinutes(1)));
+        Assert.True(store.TryRecordEvent("stripe", "evt_1", Epoch));   // another provider's event with the same id
+
+        store.ForgetEvent("polar", "evt_1");
+        Assert.True(store.TryRecordEvent("polar", "evt_1", Epoch));
+        store.ForgetEvent("polar", "evt_none");   // not an error
+    }
+
+    [SkippableFact]
+    public void Old_events_are_purged_and_new_ones_stay()
+    {
+        var store = NewSubscriptions();
+        store.TryRecordEvent("polar", "old", Epoch.AddDays(-40));
+        store.TryRecordEvent("polar", "new", Epoch);
+        Assert.Equal(1, store.PurgeEvents(Epoch.AddDays(-30)));
+        Assert.True(store.TryRecordEvent("polar", "old", Epoch));     // it was forgotten
+        Assert.False(store.TryRecordEvent("polar", "new", Epoch));    // it was not
+        Assert.Equal(0, store.PurgeEvents(Epoch.AddDays(-100)));
+    }
+
+    [SkippableFact]
+    public void Removing_an_account_forgets_what_it_paid_for_and_its_id_but_nothing_of_anyone_else()
+    {
+        var store = NewSubscriptions();
+        store.Upsert(Sub("sam@example.com", "sub_1"));
+        store.Upsert(Sub("kim@example.com", "sub_2"));
+        var sam = store.BillingIdOf("sam@example.com");
+        var kim = store.BillingIdOf("kim@example.com");
+
+        store.RemoveAccount("sam@example.com");
+        Assert.Empty(store.Of("sam@example.com"));
+        Assert.Null(store.AccountOf(sam));
+        Assert.Single(store.Of("kim@example.com"));
+        Assert.Equal("kim@example.com", store.AccountOf(kim));
+        store.RemoveAccount("nobody@example.com");   // not an error
+        // A new account with the same name is a new person to the provider.
+        Assert.NotEqual(sam, store.BillingIdOf("sam@example.com"));
+    }
 }
 
 /// <summary>The stores that keep accounts and codes in files.</summary>
@@ -602,6 +719,8 @@ public sealed class FileStoreTests : StoreContractTests
     protected override ISignupCodes NewCodes(Func<DateTimeOffset>? now = null) => new SignupCodes(Options, now ?? (() => DateTimeOffset.UtcNow));
 
     protected override IPushRegistry NewPush() => new PushRegistry(Options);
+
+    protected override ISubscriptions NewSubscriptions() => new SubscriptionStore(Options);
 
     public override void Dispose() { try { Directory.Delete(_dir, true); } catch (IOException) { } }
 }
@@ -623,6 +742,8 @@ public sealed class PostgresStoreTests : StoreContractTests
     protected override ISignupCodes NewCodes(Func<DateTimeOffset>? now = null) => Stores.Codes(Options, now ?? (() => DateTimeOffset.UtcNow));
 
     protected override IPushRegistry NewPush() => Stores.Push(Options);
+
+    protected override ISubscriptions NewSubscriptions() => Stores.Subscriptions(Options);
 
     public override void Dispose() => _database.Dispose();
 

@@ -155,7 +155,7 @@ internal static class GatewayApi
         app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
         // What an account has used today is kept in a file, written now and then and when the service stops, so a deploy does not hand out a new day.
         app.Lifetime.ApplicationStopping.Register(() => app.Services.GetRequiredService<GatewayRegistry>().Flush());
-        app.Map("/v1/gateway", async (HttpContext http, IAccounts accounts, GatewayRegistry registry, WakeLimiter limiter, ILoggerFactory logs) =>
+        app.Map("/v1/gateway", async (HttpContext http, IAccounts accounts, GatewayRegistry registry, WakeLimiter limiter, PlanGate gate, ILoggerFactory logs) =>
         {
             if (!options.GatewayEnabled) { http.Response.StatusCode = StatusCodes.Status404NotFound; return; }
             if (!http.WebSockets.IsWebSocketRequest) { http.Response.StatusCode = StatusCodes.Status400BadRequest; return; }
@@ -163,6 +163,7 @@ internal static class GatewayApi
             var address = http.Connection.RemoteIpAddress?.ToString();
             if (!limiter.TryTake("gateway:" + (address ?? "?"), options.GatewayAttemptsPerMinute, 10_000)) { http.Response.StatusCode = StatusCodes.Status429TooManyRequests; return; }
             if (accounts.UserOfToken(PushApi.Bearer(http)) is not { } user) { http.Response.StatusCode = StatusCodes.Status401Unauthorized; return; }
+            if (gate.IsLapsed(user)) { http.Response.StatusCode = StatusCodes.Status402PaymentRequired; return; }
             if (!registry.TryEnterAddress(address, options.GatewayConnectionsPerAddress)) { http.Response.StatusCode = StatusCodes.Status429TooManyRequests; return; }
             try
             {

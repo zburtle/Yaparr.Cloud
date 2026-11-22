@@ -128,6 +128,27 @@ public sealed partial class AccountDirectory : IAccounts
         lock (_gate) { Refresh(); return _users.TryGetValue(name, out var entry) && entry.PasswordHash != null; }
     }
 
+    public string? PassOf(string name)
+    {
+        lock (_gate) { Refresh(); return _users.TryGetValue(name, out var entry) ? entry.Pass : null; }
+    }
+
+    public bool SetPass(string name, string pass)
+    {
+        if (!AccountPlan.IsPass(pass)) return false;
+        lock (_gate)
+        {
+            Refresh();
+            if (!_users.TryGetValue(name, out var entry)) return false;
+            if (entry.Pass != pass)
+            {
+                entry.Pass = pass;
+                Save();
+            }
+            return true;
+        }
+    }
+
     /// <summary>Everything about every account, as it is kept (for moving the accounts to a database).</summary>
     internal IReadOnlyList<ExportedAccount> Export()
     {

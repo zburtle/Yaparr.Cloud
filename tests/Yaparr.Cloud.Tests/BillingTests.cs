@@ -453,14 +453,24 @@ public sealed class PlanGateTests : ServiceTest
     [Fact]
     public void A_provider_name_this_build_has_no_provider_for_stops_the_service_at_once_and_names_the_ones_it_has()
     {
-        var failure = Record.Exception(() => Start(new() { ["Billing:Provider"] = "polar" }, services => services.AddSingleton<IBillingProvider>(new FakeBilling())).GetAsync("/healthz").GetAwaiter().GetResult());
+        var failure = Record.Exception(() => Start(new() { ["Billing:Provider"] = "stripe" }, services => services.AddSingleton<IBillingProvider>(new FakeBilling())).GetAsync("/healthz").GetAwaiter().GetResult());
         Assert.NotNull(failure);
         var all = new List<string>();
         for (var e = failure; e != null; e = e.InnerException) all.Add(e.Message);
         var message = string.Join(" | ", all);
-        Assert.Contains("\"polar\"", message);
+        Assert.Contains("\"stripe\"", message);
         Assert.Contains("no such billing provider", message);
         Assert.Contains("fake", message);
+    }
+
+    [Fact]
+    public void Polar_named_without_its_settings_stops_the_service_and_says_what_is_missing()
+    {
+        var failure = Record.Exception(() => Start(new() { ["Billing:Provider"] = "polar", ["Billing:Polar:AccessToken"] = "x" }).GetAsync("/healthz").GetAwaiter().GetResult());
+        Assert.NotNull(failure);
+        var all = new List<string>();
+        for (var e = failure; e != null; e = e.InnerException) all.Add(e.Message);
+        Assert.Contains("Service__Billing__Polar__WebhookSecret", string.Join(" | ", all));
     }
 
     [Fact]

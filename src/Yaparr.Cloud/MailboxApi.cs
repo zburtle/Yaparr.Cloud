@@ -19,9 +19,10 @@ internal static class MailboxApi
         var keep = TimeSpan.FromDays(Math.Max(1, options.MailboxKeepDays));
 
         // What arrived after a cursor (0 for everything kept), oldest first. When there is more, the cursor in the answer is where to ask next.
-        mailbox.MapGet("{id}", (HttpContext http, string id, IAccounts accounts, IMailboxStore store, WakeLimiter limiter, long? since, int? limit) =>
+        mailbox.MapGet("{id}", (HttpContext http, string id, IAccounts accounts, IMailboxStore store, WakeLimiter limiter, PlanGate gate, long? since, int? limit) =>
         {
             if (accounts.UserOfToken(PushApi.Bearer(http)) is not { } user) return PushApi.Problem(StatusCodes.Status401Unauthorized, "This device is not signed in. Sign in again.");
+            if (gate.Refuse(user) is { } refused) return refused;
             if (!MailboxRules.GoodMailboxId(id)) return PushApi.Problem(StatusCodes.Status400BadRequest, "That is not a mailbox id.");
             if (!limiter.TryTake("mailbox-read:" + user, options.MailboxReadsPerMinute, options.MailboxReadsPerDay))
                 return PushApi.Problem(StatusCodes.Status429TooManyRequests, "This account has asked a lot lately. Try again in a minute.");
@@ -35,9 +36,10 @@ internal static class MailboxApi
         });
 
         // Leaves locked messages. One that is already there is not stored again (the same id), so a device can post again after it was cut off.
-        mailbox.MapPost("{id}", async (HttpContext http, string id, IAccounts accounts, IMailboxStore store, WakeLimiter limiter) =>
+        mailbox.MapPost("{id}", async (HttpContext http, string id, IAccounts accounts, IMailboxStore store, WakeLimiter limiter, PlanGate gate) =>
         {
             if (accounts.UserOfToken(PushApi.Bearer(http)) is not { } user) return PushApi.Problem(StatusCodes.Status401Unauthorized, "This device is not signed in. Sign in again.");
+            if (gate.Refuse(user) is { } refused) return refused;
             if (!MailboxRules.GoodMailboxId(id)) return PushApi.Problem(StatusCodes.Status400BadRequest, "That is not a mailbox id.");
             MailboxPostRequest? request;
             try { request = await http.Request.ReadFromJsonAsync<MailboxPostRequest>(); }

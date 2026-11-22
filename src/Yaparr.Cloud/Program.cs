@@ -26,6 +26,8 @@ builder.Services.AddSingleton(_ => new GatewayRegistry(() => DateTimeOffset.UtcN
 builder.Services.AddSingleton<IBackupStore>(_ => Stores.Backups(options));
 builder.Services.AddSingleton<IAccounts>(_ => Stores.Accounts(options));
 builder.Services.AddSingleton<ISignupCodes>(_ => Stores.Codes(options));
+builder.Services.AddSingleton<ISubscriptions>(_ => Stores.Subscriptions(options));
+builder.Services.AddSingleton<PlanGate>();
 builder.Services.AddSingleton<IPushRegistry>(_ => Stores.Push(options));
 builder.Services.AddSingleton<ISyncStore>(_ => Stores.Sync(options));
 builder.Services.AddSingleton<IMailboxStore>(_ => Stores.Mailbox(options));
@@ -68,6 +70,14 @@ builder.Services.AddRateLimiter(r =>
 
 var app = builder.Build();
 
+// Billing is off unless a provider is named; a name this build has no provider for is a mistake to say at once, not at the first payment.
+if (options.Billing.Provider.Length > 0)
+{
+    var known = app.Services.GetServices<IBillingProvider>().Select(p => p.Name).ToList();
+    if (!known.Contains(options.Billing.Provider, StringComparer.OrdinalIgnoreCase))
+        throw new InvalidOperationException($"Service__Billing__Provider is \"{options.Billing.Provider}\", but this build has no such billing provider (it has: {(known.Count == 0 ? "none" : string.Join(", ", known))}). Name one, or leave it empty to run without billing.");
+}
+
 // Items left in mailboxes go after MailboxKeepDays; each post clears its own mailbox, and this clears the ones nobody posts to any more.
 try
 {
@@ -96,7 +106,7 @@ app.MapGet("/login", (HttpContext http, string? redirect_uri, string? code_chall
         ? Html(http, Pages.Login(request, "", null))
         : Html(http, Pages.Message("This link does not work", problem), StatusCodes.Status400BadRequest));
 
-app.MapPost("/login", async (HttpContext http, IAccounts accounts, LoginFlow flow, LoginLimiter limiter) =>
+app.MapPost("/login", async (HttpContext http, IAccounts accounts, LoginFlow flow, LoginLimiter limiter, PlanGate gate) =>
 {
     var form = await http.Request.ReadFormAsync();
     if (LoginFlow.Read(form["redirect_uri"], form["code_challenge"], form["state"], form["device"], out var problem) is not { } request)
@@ -116,28 +126,37 @@ app.MapPost("/login", async (HttpContext http, IAccounts accounts, LoginFlow flo
         return Html(http, Pages.Login(request, typed, wrong), StatusCodes.Status401Unauthorized);
     }
     limiter.Succeeded(name);
+    // A subscription that has ended means no new device (the password was right, so it is safe to say why).
+    if (gate.IsLapsed(name))
+        return Html(http, Pages.Message("Your Yaparr Cloud subscription has ended", "This account cannot sign in on a device until it is renewed. Nothing has been deleted."), StatusCodes.Status402PaymentRequired);
     var back = flow.Complete(request, name);
     return LoginFlow.IsAppLink(request.RedirectUri) ? Html(http, Pages.BackToApp(back)) : Results.Redirect(back);
 }).DisableAntiforgery();
 
 // The app trades the code the browser brought back, and the verifier only it knows, for a token.
-app.MapPost("/v1/token", async (HttpContext http, IAccounts accounts, LoginFlow flow) =>
+app.MapPost("/v1/token", async (HttpContext http, IAccounts accounts, LoginFlow flow, PlanGate gate) =>
 {
     TokenRequest? body;
     try { body = await http.Request.ReadFromJsonAsync<TokenRequest>(); }
     catch (Exception ex) when (ex is JsonException or InvalidOperationException) { body = null; }
-    if (flow.Redeem(body?.Code, body?.Verifier) is not { } signedIn || accounts.IssueToken(signedIn.User, signedIn.Device, body?.DeviceKey, body?.MachineKey) is not { } token)
+    if (flow.Redeem(body?.Code, body?.Verifier) is not { } signedIn)
+        return Problem(StatusCodes.Status400BadRequest, "That sign-in has expired or was already used. Sign in again.");
+    if (gate.Refuse(signedIn.User) is { } refused) return refused;
+    if (accounts.IssueToken(signedIn.User, signedIn.Device, body?.DeviceKey, body?.MachineKey) is not { } token)
         return Problem(StatusCodes.Status400BadRequest, "That sign-in has expired or was already used. Sign in again.");
     return Results.Json(new { token, username = signedIn.User });
 });
 
 // The app opened from the "You're in" page trades the code in its button for a token (see SignInHandoff).
-app.MapPost("/v1/token/handoff", async (HttpContext http, IAccounts accounts, SignInHandoff handoff) =>
+app.MapPost("/v1/token/handoff", async (HttpContext http, IAccounts accounts, SignInHandoff handoff, PlanGate gate) =>
 {
     HandoffRequest? body;
     try { body = await http.Request.ReadFromJsonAsync<HandoffRequest>(); }
     catch (Exception ex) when (ex is JsonException or InvalidOperationException) { body = null; }
-    if (handoff.Redeem(body?.Code) is not { } user || accounts.IssueToken(user, "Yaparr, opened from the sign-up page") is not { } token)
+    if (handoff.Redeem(body?.Code) is not { } user)
+        return Problem(StatusCodes.Status400BadRequest, "That sign-in has expired or was already used. Sign in from Yaparr's settings instead.");
+    if (gate.Refuse(user) is { } refused) return refused;
+    if (accounts.IssueToken(user, "Yaparr, opened from the sign-up page") is not { } token)
         return Problem(StatusCodes.Status400BadRequest, "That sign-in has expired or was already used. Sign in from Yaparr's settings instead.");
     return Results.Json(new { token, username = user });
 });
@@ -173,7 +192,7 @@ app.MapPost("/account/password", async (HttpContext http, IAccounts accounts, Lo
 // Deleting an account, by its owner: the email address, the password and the words typed. It removes the account and everything held for it (AccountErasure).
 app.MapGet("/account/delete", (HttpContext http) => Html(http, Pages.DeleteAccount("", null)));
 
-app.MapPost("/account/delete", async (HttpContext http, IAccounts accounts, LoginLimiter limiter, IBackupStore backups, IPushRegistry push, ISyncStore sync, IMailboxStore mailbox, IBlobStore blobs, IKeepStore kept, ILoggerFactory logs) =>
+app.MapPost("/account/delete", async (HttpContext http, IAccounts accounts, LoginLimiter limiter, IBackupStore backups, IPushRegistry push, ISyncStore sync, IMailboxStore mailbox, IBlobStore blobs, IKeepStore kept, ISubscriptions subscriptions, ILoggerFactory logs) =>
 {
     var form = await http.Request.ReadFormAsync();
     var typed = form["username"].ToString();
@@ -194,7 +213,7 @@ app.MapPost("/account/delete", async (HttpContext http, IAccounts accounts, Logi
     // An admin has to be taken off the portal first, on the server, so that the last one is not deleted by mistake.
     if (accounts.IsAdmin(name))
         return Again("This account can sign in to the admin portal. Ask whoever runs this server to take that away first.", StatusCodes.Status409Conflict);
-    await AccountErasure.EraseAsync(name, accounts, backups, push, sync, mailbox: mailbox, blobs: blobs, kept: kept);
+    await AccountErasure.EraseAsync(name, accounts, backups, push, sync, mailbox: mailbox, blobs: blobs, kept: kept, subscriptions: subscriptions);
     // Logged without the name: only that it happened.
     logs.CreateLogger("Yaparr.Cloud.Accounts").LogInformation("An account was deleted by its owner");
     return Html(http, Pages.Message("Your account is deleted", "Your locked copy, synced settings and wake-up registrations are gone from this server, and every device is signed out."));
@@ -270,9 +289,10 @@ app.MapAccountApi(options);
 
 var backup = app.MapGroup("/v1/backup");
 
-backup.MapPut("", async (HttpContext http, IBackupStore store, WriteLimiter writes, IAccounts accounts, CancellationToken cancel) =>
+backup.MapPut("", async (HttpContext http, IBackupStore store, WriteLimiter writes, IAccounts accounts, PlanGate gate, CancellationToken cancel) =>
 {
     if (accounts.UserOfToken(BearerOf(http)) is not { } user) return Problem(StatusCodes.Status401Unauthorized, NotSignedIn);
+    if (gate.Refuse(user) is { } refused) return refused;
 
     if (!http.Request.Headers.TryGetValue("If-Match", out var ifMatch) || !int.TryParse(ifMatch.ToString().Trim('"'), NumberStyles.None, CultureInfo.InvariantCulture, out var basedOn))
         return Problem(StatusCodes.Status428PreconditionRequired, "Say which version this is based on (If-Match: the newest version you know, 0 if there is none).");

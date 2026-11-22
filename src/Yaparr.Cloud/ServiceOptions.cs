@@ -204,4 +204,7 @@ public sealed class ServiceOptions
     /// <summary>True when a reverse proxy sits in front (which is how it gets https), so the caller's address is read from <c>X-Forwarded-For</c>. Leave it off when the service is reachable directly, or anyone could claim any address.</summary>
     public bool BehindProxy { get; set; }
 
+    /// <summary>Paid plans (<c>Service__Billing__…</c>). Off unless a provider is named; see <see cref="BillingOptions"/>.</summary>
+    public BillingOptions Billing { get; set; } = new();
+
 }

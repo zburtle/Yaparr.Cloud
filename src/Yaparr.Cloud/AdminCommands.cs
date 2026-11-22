@@ -14,7 +14,8 @@ public static class AdminCommands
         "  accounts password <email> [--password <password>]      give an account a new password and sign its devices out\n" +
         "  accounts remove <email> [--keep-backup]                remove an account and, unless told not to, its backup\n" +
         "  accounts list                                          who has an account, their devices, and the space each uses\n" +
-        "  accounts admin <email> [--remove]                      let an account sign in to the admin portal (/admin): shows the secret for its authenticator app once; --remove takes it away\n";
+        "  accounts admin <email> [--remove]                      let an account sign in to the admin portal (/admin): shows the secret for its authenticator app once; --remove takes it away\n" +
+        "  accounts pass <email> lifetime|none                    give an account the lifetime pass (it is never asked to pay), or take it away (it then follows its subscriptions; only matters once billing is on)\n";
 
     public const string CodesUsage =
         "Usage:\n" +
@@ -239,11 +240,26 @@ public static class AdminCommands
                 var keep = rest.Contains("--keep-backup");
                 // The devices registered to be woken and the synced records go with the account.
                 var erased = name == null ? (Existed: false, HadBackup: false)
-                    : await AccountErasure.EraseAsync(name, accounts, store, Stores.Push(options), Stores.Sync(options), keep, mailbox: Stores.Mailbox(options), blobs: Stores.Blobs(options), kept: Stores.Keep(options));
+                    : await AccountErasure.EraseAsync(name, accounts, store, Stores.Push(options), Stores.Sync(options), keep, mailbox: Stores.Mailbox(options), blobs: Stores.Blobs(options), kept: Stores.Keep(options), subscriptions: Stores.Subscriptions(options));
                 if (!erased.Existed) { output.WriteLine("There is no such account."); return 1; }
                 output.WriteLine($"Removed the account {name}.");
                 if (keep) output.WriteLine("Its backup was kept. Making an account with the same name again reaches it.");
                 else output.WriteLine(erased.HadBackup ? "Its backup was deleted." : "It had no backup.");
+                return 0;
+            }
+            case "pass":
+            {
+                var name = rest.Count == 2 ? AccountDirectory.Normalize(rest[0]) : null;
+                var pass = rest.Count == 2 ? rest[1].ToLowerInvariant() : null;
+                if (name == null || !AccountPlan.IsPass(pass)) { output.Write(Usage); return 2; }
+                if (!accounts.SetPass(name, pass!)) { output.WriteLine("There is no such account."); return 1; }
+                output.WriteLine(pass == AccountPlan.Lifetime
+                    ? $"{name} has the lifetime pass now: it is never asked to pay."
+                    : $"{name} no longer has the lifetime pass: once billing is on it follows its subscriptions.");
+                // What is already being paid for is not stopped from here: the provider is the one that charges.
+                var subs = Stores.Subscriptions(options).Of(name).Where(s => s.Status != SubscriptionStatus.Ended).ToList();
+                if (pass == AccountPlan.Lifetime && subs.Count > 0)
+                    output.WriteLine($"It still has {subs.Count} subscription{(subs.Count == 1 ? "" : "s")} at {string.Join(", ", subs.Select(s => s.Provider).Distinct())}: cancel {(subs.Count == 1 ? "it" : "them")} there so that it is not charged again, and refund the unused part if that is what is owed.");
                 return 0;
             }
             case "admin":
@@ -267,6 +283,7 @@ public static class AdminCommands
             case "list":
             {
                 var all = accounts.List();
+                var gate = options.Billing.Provider.Length > 0 ? new PlanGate(options, accounts, Stores.Subscriptions(options)) : null;
                 if (all.Count == 0) output.WriteLine("No accounts yet.");
                 foreach (var account in all)
                 {
@@ -277,7 +294,7 @@ public static class AdminCommands
                     output.WriteLine($"{account.Name,-32} made {account.Created:yyyy-MM-dd}  " +
                         (account.HasPassword ? $"{account.Devices} device{(account.Devices == 1 ? "" : "s")} signed in"
                             : account.SignupCode != null ? "signed up, has not chosen a password yet"
-                            : "NO PASSWORD (run: accounts password " + account.Name + ")") + $"  {account.Pass} pass" + (account.SignupCode != null ? $" (code {account.SignupCode})" : "") + (account.IsAdmin ? "  ADMIN" : "") + "  " +
+                            : "NO PASSWORD (run: accounts password " + account.Name + ")") + $"  {account.Pass} pass" + (gate == null ? "" : $", {gate.StateOf(account.Name).ToString().ToLowerInvariant()}") + (account.SignupCode != null ? $" (code {account.SignupCode})" : "") + (account.IsAdmin ? "  ADMIN" : "") + "  " +
                         (versions.Count == 0 ? "no backup" : $"{versions.Count} version{(versions.Count == 1 ? "" : "s")}, {size / 1024.0 / 1024.0:0.0} MiB, last {versions[0].At:yyyy-MM-dd HH:mm}"));
                 }
                 return 0;

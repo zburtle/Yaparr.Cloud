@@ -32,6 +32,8 @@ public static class Stores
 
     public static IAccounts Accounts(ServiceOptions options) => options.Database.Length > 0 ? new PostgresAccounts(Source(options)) : new AccountDirectory(options);
 
+    public static ISubscriptions Subscriptions(ServiceOptions options) => options.Database.Length > 0 ? new PostgresSubscriptions(Source(options)) : new SubscriptionStore(options);
+
     public static IPushRegistry Push(ServiceOptions options) => options.Database.Length > 0 ? new PostgresPushRegistry(Source(options)) : new PushRegistry(options);
 
     public static ISyncStore Sync(ServiceOptions options) => options.Database.Length > 0 ? new PostgresSyncStore(Source(options)) : new SyncStore(options);

@@ -9,7 +9,7 @@ public static class AccountErasure
 {
     /// <returns>Whether there was such an account, and whether it had a backup (false too when the backup was kept).</returns>
     public static async Task<(bool Existed, bool HadBackup)> EraseAsync(string name, IAccounts accounts, IBackupStore backups, IPushRegistry push, ISyncStore sync,
-        bool keepBackup = false, CancellationToken cancel = default, IMailboxStore? mailbox = null, IBlobStore? blobs = null, IKeepStore? kept = null)
+        bool keepBackup = false, CancellationToken cancel = default, IMailboxStore? mailbox = null, IBlobStore? blobs = null, IKeepStore? kept = null, ISubscriptions? subscriptions = null)
     {
         // The account first: from then on no token of it works, so nothing can be written to it while the rest goes.
         if (!accounts.Remove(name)) return (false, false);
@@ -17,6 +17,7 @@ public static class AccountErasure
         sync.RemoveAccount(name);
         blobs?.RemoveAccount(name);   // and the pictures it uploaded
         kept?.RemoveAccount(name);    // and the pieces it kept for good
+        subscriptions?.RemoveAccount(name);   // what is known of what it paid for (the provider is told by the caller that can reach one)
         mailbox?.RemoveAccount(name);   // what the account left in room mailboxes (locked, so nothing of it can be read, but it is theirs to have removed)
         var hadBackup = !keepBackup && await backups.DeleteAsync(BackupStore.FolderOf(name), cancel);
         return (true, hadBackup);

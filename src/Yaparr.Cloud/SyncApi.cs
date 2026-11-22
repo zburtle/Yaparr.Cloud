@@ -18,9 +18,10 @@ internal static class SyncApi
         var sync = app.MapGroup("/v1/sync");
 
         // What changed after a cursor (0 for everything), oldest first. When there is more, the cursor in the answer is where to ask next.
-        sync.MapGet("", (HttpContext http, IAccounts accounts, ISyncStore store, long? since, int? limit) =>
+        sync.MapGet("", (HttpContext http, IAccounts accounts, ISyncStore store, PlanGate gate, long? since, int? limit) =>
         {
             if (accounts.UserOfToken(PushApi.Bearer(http)) is not { } user) return PushApi.Problem(StatusCodes.Status401Unauthorized, "This device is not signed in. Sign in again.");
+            if (gate.Refuse(user) is { } refused) return refused;
             var page = store.Pull(user, Math.Max(0, since ?? 0), Math.Clamp(limit ?? MaxBatch, 1, MaxBatch));
             return Results.Json(new
             {
@@ -31,9 +32,10 @@ internal static class SyncApi
         });
 
         // Sends records. Those that are not newer than what the service holds are named in "stale" and not taken; the device pulls and finds the newer ones.
-        sync.MapPut("", async (HttpContext http, IAccounts accounts, ISyncStore store, WakeLimiter limiter) =>
+        sync.MapPut("", async (HttpContext http, IAccounts accounts, ISyncStore store, WakeLimiter limiter, PlanGate gate) =>
         {
             if (accounts.UserOfToken(PushApi.Bearer(http)) is not { } user) return PushApi.Problem(StatusCodes.Status401Unauthorized, "This device is not signed in. Sign in again.");
+            if (gate.Refuse(user) is { } refused) return refused;
             SyncPutRequest? request;
             try { request = await http.Request.ReadFromJsonAsync<SyncPutRequest>(); }
             catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidOperationException) { request = null; }

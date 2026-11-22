@@ -47,9 +47,10 @@ internal static class PushApi
         push.MapGet("/options", (IPushSender sender) => Results.Json(new { unifiedPush = true, fcm = sender.FcmAvailable }));
 
         // Registers this device (or changes where it is woken). A new device is given its wake token here, once; the app keeps it and shares it with its rooms.
-        push.MapPut("", async (HttpContext http, IAccounts accounts, IPushRegistry registry, IPushSender sender) =>
+        push.MapPut("", async (HttpContext http, IAccounts accounts, IPushRegistry registry, IPushSender sender, PlanGate gate) =>
         {
             if (accounts.UserOfToken(Bearer(http)) is not { } user) return Problem(StatusCodes.Status401Unauthorized, "This device is not signed in. Sign in again.");
+            if (gate.Refuse(user) is { } refused) return refused;
             PushRegisterRequest? body;
             try { body = await http.Request.ReadFromJsonAsync<PushRegisterRequest>(); }
             catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidOperationException) { body = null; }
@@ -99,7 +100,7 @@ internal static class PushApi
         // Asking for a wake-up. No account: the token is the permission. It answers the same for a token that does not exist as for one that does not lead anywhere.
         // What is logged is only the outcome, and the way (fcm or unifiedpush) when there was a target: never a token, an account, a device, an address or who asked,
         // so that the log can tell whether wake-ups work without telling anything about anyone.
-        push.MapPost("/wake/{token}", async (IAccounts accounts, IPushRegistry registry, IPushSender sender, WakeLimiter limiter, ILoggerFactory logs, string token, CancellationToken cancel) =>
+        push.MapPost("/wake/{token}", async (IAccounts accounts, IPushRegistry registry, IPushSender sender, WakeLimiter limiter, PlanGate gate, ILoggerFactory logs, string token, CancellationToken cancel) =>
         {
             var log = logs.CreateLogger("Yaparr.Cloud.Push");
             if (registry.Find(token) is not { } target)
@@ -112,6 +113,12 @@ internal static class PushApi
             {
                 registry.RemoveAccount(target.Account);
                 log.LogInformation("wake: no account any more ({Way})", way);
+                return Problem(StatusCodes.Status404NotFound, "Nobody to wake.");
+            }
+            // A lapsed account is not woken, and the sender is told what it is told for a token that leads nowhere (nothing about the account, and the registration is kept for when it is renewed).
+            if (gate.IsLapsed(target.Account))
+            {
+                log.LogInformation("wake: no such token");
                 return Problem(StatusCodes.Status404NotFound, "Nobody to wake.");
             }
             if (!limiter.TryTake(token, options.PushWakesPerMinute, options.PushWakesPerDay))

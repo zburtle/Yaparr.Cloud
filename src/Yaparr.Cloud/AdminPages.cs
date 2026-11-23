@@ -100,6 +100,11 @@ internal static class AdminPages
         tr:last-child td { border-bottom: 0; }
         td.actions { white-space: nowrap; text-align: right; }
         td.actions form { display: inline; margin: 0; }
+        /* The table of accounts fits the card instead of scrolling: its cells take two or three short lines, and the buttons wrap. */
+        table.accounts { min-width: 0; }
+        table.accounts td { white-space: normal; vertical-align: top; }
+        table.accounts td.use div { white-space: nowrap; }
+        table.accounts .acts { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; max-width: 210px; margin-left: auto; }
         .empty { padding: 28px 20px; text-align: center; color: var(--muted); }
         .name { font-weight: 550; }
 
@@ -271,24 +276,25 @@ internal static class AdminPages
             var state = a.HasPassword ? Plural(a.Devices, "device") + " signed in" : a.SignupCode != null ? "Signed up, no password yet" : "No password";
             var backup = !row.Known ? "<span class=\"muted\">Not available</span>"
                 : row.Versions == 0 ? "<span class=\"muted\">No backup</span>"
-                : $"{Mib(row.Bytes)} <span class=\"muted\">· {Plural(row.Versions, "version")}, {row.Last:yyyy-MM-dd HH:mm}</span>";
+                : $"{Mib(row.Bytes)}<div class=\"muted small\">{Plural(row.Versions, "version")}, {row.Last:yyyy-MM-dd HH:mm}</div>";
             var unknown = "<span class=\"muted\">Not available</span>";
             var l = limits ?? new UseLimits(0, 0, 0);
             accountRows.Append($"""
                 <tr>
-                <td><span class="name">{E(a.Name)}</span>{(a.IsAdmin ? "<span class=\"pill admin\">Admin</span>" : "")}</td>
-                <td>{E(state)}</td>
+                <td><span class="name">{E(a.Name)}</span>{(a.IsAdmin ? "<span class=\"pill admin\">Admin</span>" : "")}
+                <div class="muted small">{E(state)} · made {a.Created:yyyy-MM-dd}</div></td>
                 {string.Concat(views.Where(v => v.ColumnTitle != null).Select(v => $"<td>{v.Cell(a)}</td>"))}
                 <td>{backup}</td>
-                <td>{(row.Use is { } u ? Of(u.Kept, l.Kept) : unknown)}</td>
-                <td>{(row.Use is { } p ? Of(p.Pictures, l.Pictures) : unknown)}</td>
-                <td>{(row.Use is { } g ? Of(g.GatewayToday, l.GatewayPerDay) : unknown)}</td>
-                <td class="muted">{a.Created:yyyy-MM-dd}</td>
-                <td class="actions">
+                <td class="use">
+                <div><span class="muted">Kept in sync</span> {(row.Use is { } u ? Of(u.Kept, l.Kept) : unknown)}</div>
+                <div><span class="muted">Pictures left</span> {(row.Use is { } p ? Of(p.Pictures, l.Pictures) : unknown)}</div>
+                <div><span class="muted">Gateway today</span> {(row.Use is { } g ? Of(g.GatewayToday, l.GatewayPerDay) : unknown)}</div>
+                </td>
+                <td class="actions"><div class="acts">
                 <form method="post" action="/admin/accounts/password">{token}<input type="hidden" name="name" value="{E(a.Name)}"><button class="btn secondary small" type="submit" aria-label="Reset the password of {E(a.Name)}">Reset password</button></form>
                 {string.Concat(views.Select(v => v.Actions(a, session.Csrf)))}
                 <a class="btn link-danger" href="/admin/accounts/remove?name={Uri.EscapeDataString(a.Name)}" aria-label="Remove {E(a.Name)}">Remove</a>
-                </td>
+                </div></td>
                 </tr>
                 """);
         }
@@ -357,10 +363,10 @@ internal static class AdminPages
             """)}
 
             <section class="card">
-            <header><div><h2>Accounts</h2><p class="muted small">Backups are locked on each person's device: nothing here can read one. The columns after Backup are what each account holds against its limits (kept in sync, pictures left for people who are away, and the gateway today); amber is over nine tenths.</p></div></header>
+            <header><div><h2>Accounts</h2><p class="muted small">Backups are locked on each person's device: nothing here can read one. Use is what each account holds against its limits (kept in sync, pictures left for people who are away, and the gateway today); amber is over nine tenths.</p></div></header>
             {(rows.Count == 0 ? "<div class=\"empty\">No accounts yet.</div>" : $"""
-            <div class="scroll"><table>
-            <thead><tr><th>Account</th><th>State</th>{string.Concat(views.Where(v => v.ColumnTitle != null).Select(v => $"<th>{E(v.ColumnTitle)}</th>"))}<th>Backup</th><th>Kept in sync</th><th>Pictures left</th><th>Gateway today</th><th>Made</th><th></th></tr></thead>
+            <div class="scroll"><table class="accounts">
+            <thead><tr><th>Account</th>{string.Concat(views.Where(v => v.ColumnTitle != null).Select(v => $"<th>{E(v.ColumnTitle)}</th>"))}<th>Backup</th><th>Use</th><th></th></tr></thead>
             <tbody>
             {accountRows}
             </tbody></table></div>

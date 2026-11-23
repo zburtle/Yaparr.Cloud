@@ -265,9 +265,9 @@ public sealed class AdminPortalTests : ServiceTest
         new AccountDirectory(Options).Add("friend@example.com", Password);
         var (_, _, html) = await Open(admin);
 
-        Assert.Contains("<th>Kept in sync</th>", html);
-        Assert.Contains("<th>Pictures left</th>", html);
-        Assert.Contains("<th>Gateway today</th>", html);
+        Assert.Contains("Kept in sync</span>", html);
+        Assert.Contains("Pictures left</span>", html);
+        Assert.Contains("Gateway today</span>", html);
         Assert.Contains($"of {Options.KeepQuotaBytes / 1048576.0:0.0} MiB", html);
         Assert.Contains($"of {Options.BlobQuotaBytes / 1048576.0:0.0} MiB", html);
         Assert.Contains($"of {Options.GatewayBytesPerDay / 1048576.0:0.0} MiB", html);

@@ -36,13 +36,11 @@ services:
       # Push notifications through Firebase: the path, inside the container, of the service account key (README, "Push notifications"). Mount the file read-only
       # under volumes below, outside the repository. Empty: only UnifiedPush works.
       Service__PushFcmServiceAccountFile: "${PUSH_FCM_SERVICE_ACCOUNT_FILE:-}"
-      # Paid plans (README, "Paid plans"): off while BILLING_PROVIDER is empty. The Polar secrets live in .env on the host, never in this file or the repository.
+      # What a payment decides (README, "Paid plans"): billing gates the services while BILLING_PROVIDER names a provider that a plug-in answers to; empty is off.
+      # A plug-in that takes payments brings its own settings in a compose file of its own (COMPOSE_FILE adds it); none is in this repository.
       Service__Billing__Provider: "${BILLING_PROVIDER:-}"
-      Service__Billing__Polar__Server: "${POLAR_SERVER:-production}"
-      Service__Billing__Polar__AccessToken: "${POLAR_ACCESS_TOKEN:-}"
-      Service__Billing__Polar__WebhookSecret: "${POLAR_WEBHOOK_SECRET:-}"
-      Service__Billing__Polar__CloudMonthlyProduct: "${POLAR_CLOUD_MONTHLY_PRODUCT:-}"
-      Service__Billing__Polar__CloudYearlyProduct: "${POLAR_CLOUD_YEARLY_PRODUCT:-}"
+      # Plug-ins (README, "Plug-ins"): the folder on the host that PLUGINS_DIR names is mounted here, read only. Empty (the default): none, and the service is what this repository is.
+      Service__PluginsDirectory: "/plugins"
       # Email, for proving an address and for a forgotten password (README, "Email"): off while MAIL_HOST is empty. The password lives in .env on the host, never in this file.
       Service__Mail__Host: "${MAIL_HOST:-}"
       Service__Mail__Port: "${MAIL_PORT:-587}"
@@ -57,6 +55,7 @@ services:
       # Service__RequestsPerMinute: "120"
     volumes:
       - cloud-data:/data                     # the accounts, the signup codes and every backup: this is what to back up
+      - ${PLUGINS_DIR:-./plugins}:/plugins:ro   # plug-in assemblies (a folder that may be empty); see README, "Plug-ins"
       - ${PUSH_FCM_SERVICE_ACCOUNT_HOST_FILE:-/dev/null}:/run/secrets/fcm.json:ro   # the Firebase key, kept on the host outside the repository (set both PUSH_FCM_ variables in .env)
     depends_on:
       postgres:

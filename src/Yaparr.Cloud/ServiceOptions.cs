@@ -207,6 +207,12 @@ public sealed class ServiceOptions
     /// <summary>Paid plans (<c>Service__Billing__…</c>). Off unless a provider is named; see <see cref="BillingOptions"/>.</summary>
     public BillingOptions Billing { get; set; } = new();
 
+    /// <summary>A folder of plug-ins (assemblies; see Plugins.cs), loaded at the start. Empty: none, and the service is what this repository is.</summary>
+    public string PluginsDirectory { get; set; } = "";
+
+    /// <summary>Plug-in assemblies by path, besides the folder (a plug-in built beside the service, or put in place by a test).</summary>
+    public string[] Plugins { get; set; } = Array.Empty<string>();
+
     /// <summary>Email (<c>Service__Mail__…</c>), for proving an address and for a forgotten password. Off unless a host is named; see <see cref="MailOptions"/>.</summary>
     public MailOptions Mail { get; set; } = new();
 
